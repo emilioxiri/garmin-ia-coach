@@ -50,12 +50,11 @@ def scheduled_sync_and_briefing(app, moment: str):
         logger.error(f"❌ Error en sync programado: {e}")
 
     try:
+        from garmin_sync import _bot_loop
         briefing = generate_daily_briefing(moment)
-        # Enviar mensaje de forma thread-safe al loop de asyncio del bot
-        loop = app.update_queue._loop if hasattr(app.update_queue, '_loop') else None
-        if loop and loop.is_running():
+        if _bot_loop and _bot_loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                send_scheduled_message(app, briefing), loop
+                send_scheduled_message(app, briefing), _bot_loop
             )
         else:
             logger.warning("No se pudo enviar el briefing: loop de asyncio no disponible")

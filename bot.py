@@ -14,7 +14,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from coach import CoachSession, generate_daily_briefing
-from garmin_sync import sync_all, provide_mfa_code
+from garmin_sync import sync_all, provide_mfa_code, set_event_loop
 from db import get_last_sync, log_sync, save_memory, get_context_for_ai
 import json
 
@@ -57,12 +57,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
+    import asyncio
     msg = await update.message.reply_text("🔄 Sincronizando datos de Garmin... puede tardar un momento.")
     try:
         email = os.getenv("GARMIN_EMAIL")
         password = os.getenv("GARMIN_PASSWORD")
         days = int(os.getenv("DAYS_HISTORY", "30"))
-        summary = sync_all(email, password, days)
+        loop = asyncio.get_running_loop()
+        set_event_loop(loop)
+        summary = await loop.run_in_executor(None, sync_all, email, password, days)
         log_sync(summary)
         text = (
             f"✅ *Sync completado*\n"
@@ -96,11 +99,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
+    import asyncio
     from datetime import datetime
     hour = datetime.now().hour
     moment = "morning" if hour < 14 else "evening"
     msg = await update.message.reply_text("🤔 Generando tu briefing personalizado...")
-    briefing = generate_daily_briefing(moment)
+    loop = asyncio.get_event_loop()
+    briefing = await loop.run_in_executor(None, generate_daily_briefing, moment)
     await msg.edit_text(briefing)
 
 
@@ -177,7 +182,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def build_application() -> Application:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    app = Application.builder().token(token).build()
+    app = Application.builder().token(token).concurrent_updates(True).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("sync", cmd_sync))

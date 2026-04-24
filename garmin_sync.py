@@ -8,7 +8,7 @@ import asyncio
 import logging
 import os
 import threading
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from pathlib import Path
 
 from garminconnect import Garmin
@@ -16,11 +16,12 @@ from db import get_db
 
 logger = logging.getLogger(__name__)
 
-SESSION_PATH = Path("/data/garmin_session.pkl")
+SESSION_PATH = Path("/data/garmin_session.json")
 
 # ── MFA state ─────────────────────────────────────────────────────────────────
 
 _bot_app = None
+_bot_loop = None
 _mfa_event = threading.Event()
 _mfa_code: str | None = None
 
@@ -28,6 +29,12 @@ _mfa_code: str | None = None
 def set_bot_app(app) -> None:
     global _bot_app
     _bot_app = app
+
+
+def set_event_loop(loop) -> None:
+    """Call this from an async context so _bot_loop is the running loop."""
+    global _bot_loop
+    _bot_loop = loop
 
 
 def provide_mfa_code(code: str) -> None:
@@ -41,21 +48,19 @@ def _prompt_mfa() -> str:
     _mfa_event.clear()
     _mfa_code = None
 
-    if _bot_app:
-        loop = getattr(_bot_app.update_queue, "_loop", None)
-        if loop and loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                _bot_app.bot.send_message(
-                    chat_id=int(os.getenv("TELEGRAM_ALLOWED_USER_ID", "0")),
-                    text=(
-                        "🔐 *Garmin necesita verificación MFA*\n"
-                        "Revisa tu email o app de autenticación y responde con:\n"
-                        "`/mfa <código>`"
-                    ),
-                    parse_mode="Markdown",
+    if _bot_app and _bot_loop and _bot_loop.is_running():
+        asyncio.run_coroutine_threadsafe(
+            _bot_app.bot.send_message(
+                chat_id=int(os.getenv("TELEGRAM_ALLOWED_USER_ID", "0")),
+                text=(
+                    "🔐 *Garmin necesita verificación MFA*\n"
+                    "Revisa tu email o app de autenticación y responde con:\n"
+                    "`/mfa <código>`"
                 ),
-                loop,
-            )
+                parse_mode="Markdown",
+            ),
+            _bot_loop,
+        )
 
     logger.info("⏳ Esperando código MFA del usuario (timeout: 5 min)...")
     got_code = _mfa_event.wait(timeout=300)
@@ -69,10 +74,6 @@ def _prompt_mfa() -> str:
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
-def _is_rate_limited(exc: Exception) -> bool:
-    return "429" in str(exc) or "Too Many Requests" in str(exc)
-
-
 def get_garmin_client(email: str, password: str) -> Garmin:
     """
     Devuelve un cliente autenticado de Garmin Connect.
@@ -83,32 +84,19 @@ def get_garmin_client(email: str, password: str) -> Garmin:
 
     if SESSION_PATH.exists():
         try:
-            saved_tokens = SESSION_PATH.read_text(encoding="utf-8")
-            client.login(saved_tokens)
-            client.get_full_name()
+            client.login(tokenstore=str(SESSION_PATH))
             logger.info("✅ Sesión de Garmin reutilizada desde disco")
             return client
         except Exception as e:
-            if _is_rate_limited(e):
-                raise RuntimeError(
-                    "Garmin Connect está bloqueando las peticiones (429 Too Many Requests). "
-                    "Espera unas horas antes de volver a intentarlo."
-                ) from e
             logger.warning(f"⚠️  Sesión expirada o inválida, haciendo login completo: {e}")
             SESSION_PATH.unlink(missing_ok=True)
 
     try:
         client.login()
         SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SESSION_PATH.write_text(client.garth.dumps(), encoding="utf-8")
+        client.client.dump(str(SESSION_PATH))
         logger.info("✅ Login completo en Garmin. Sesión guardada en disco.")
     except Exception as e:
-        if _is_rate_limited(e):
-            logger.info("Garmin Connect está bloqueando las peticiones (429 Too Many Requests). Espera unas horas antes de volver a intentarlo.")
-            raise RuntimeError(
-                "Garmin Connect está bloqueando las peticiones (429 Too Many Requests). "
-                "Espera unas horas antes de volver a intentarlo."
-            ) from e
         raise RuntimeError(f"No se pudo autenticar en Garmin Connect: {e}") from e
 
     return client
@@ -150,7 +138,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
                 "anaerobicTE": act.get("anaerobicTrainingEffect"),
                 "avgPace": act.get("avgSpeed"),
                 "elevationGain": act.get("elevationGain"),
-                "synced_at": datetime.utcnow().isoformat(),
+                "synced_at": datetime.now(timezone.utc).isoformat(),
             }
             if act_table.search(Act.activityId == act_id):
                 act_table.update(record, Act.activityId == act_id)
@@ -182,7 +170,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
                         "awake_s": daily.get("awakeSleepSeconds"),
                         "score": daily.get("sleepScores", {}).get("overall", {}).get("value"),
                         "restingHR": daily.get("restingHeartRate"),
-                        "synced_at": datetime.utcnow().isoformat(),
+                        "synced_at": datetime.now(timezone.utc).isoformat(),
                     }
                     if sleep_table.search(Sleep.date == day_str):
                         sleep_table.update(record, Sleep.date == day_str)
@@ -215,7 +203,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
                         "lastNight5MinHigh": summary_hrv.get("lastNight5MinHigh"),
                         "status": summary_hrv.get("status"),
                         "feedbackPhrase": summary_hrv.get("feedbackPhrase"),
-                        "synced_at": datetime.utcnow().isoformat(),
+                        "synced_at": datetime.now(timezone.utc).isoformat(),
                     }
                     if hrv_table.search(HRV.date == day_str):
                         hrv_table.update(record, HRV.date == day_str)
@@ -247,7 +235,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
                         "date": day_str,
                         "max": charged,
                         "min": drained,
-                        "synced_at": datetime.utcnow().isoformat(),
+                        "synced_at": datetime.now(timezone.utc).isoformat(),
                     }
                     if bb_table.search(BB.date == day_str):
                         bb_table.update(record, BB.date == day_str)

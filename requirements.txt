@@ -1,4 +1,6 @@
-garminconnect==0.2.19
+garminconnect==0.3.3
+curl_cffi>=0.15.0
+ua-generator>=2.0.0
 python-telegram-bot==20.7
 anthropic==0.40.0
 tinydb==4.8.0
