@@ -41,4 +41,4 @@ VOLUME ["/data"]
 
 RUN mkdir -p /data/logs
 
-CMD ["python", "main.py"]
+CMD ["/usr/local/bin/python", "main.py"]
