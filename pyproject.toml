@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "garmin-coach"
+version = "0.1.0"
+description = "Bot de Telegram con entrenador personal IA usando datos de Garmin Connect"
+authors = ["Tu Nombre <tu@email.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+garminconnect = "0.2.19"
+python-telegram-bot = "20.7"
+anthropic = "0.40.0"
+tinydb = "^4.8.0"
+schedule = "^1.2.1"
+python-dotenv = "^1.0.0"
+aiohttp = "^3.9.1"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.4.0"
+ipython = "^8.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,7 @@
+garminconnect==0.2.19
+python-telegram-bot==20.7
+anthropic==0.40.0
+tinydb==4.8.0
+schedule==1.2.1
+python-dotenv==1.0.0
+aiohttp==3.9.1
