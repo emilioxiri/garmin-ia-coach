@@ -1,7 +1,7 @@
 # 🏃 Garmin Coach Bot
 
 Bot de Telegram que actúa como entrenador personal de alto rendimiento,
-usando tus datos de **Garmin Connect** y **Claude (Anthropic)** como cerebro IA.
+usando tus datos de **Garmin Connect** y **Groq** como cerebro IA.
 
 ---
 
@@ -67,7 +67,7 @@ GARMIN_PASSWORD=tu_password_garmin
 TELEGRAM_BOT_TOKEN=      # De @BotFather en Telegram
 TELEGRAM_ALLOWED_USER_ID= # Tu ID de Telegram (usa @userinfobot para saberlo)
 
-ANTHROPIC_API_KEY=sk-ant-...
+GROQ_API_KEY=gsk-AKU...
 
 SYNC_TIME_MORNING=07:00   # Hora del briefing de mañana
 SYNC_TIME_EVENING=21:00   # Hora del briefing de noche
