@@ -22,6 +22,7 @@ logging.basicConfig(
         logging.FileHandler("/data/logs/bot.log"),
     ],
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

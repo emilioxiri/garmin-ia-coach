@@ -104,6 +104,7 @@ def get_garmin_client(email: str, password: str) -> Garmin:
         logger.info("✅ Login completo en Garmin. Sesión guardada en disco.")
     except Exception as e:
         if _is_rate_limited(e):
+            logger.info("Garmin Connect está bloqueando las peticiones (429 Too Many Requests). Espera unas horas antes de volver a intentarlo.")
             raise RuntimeError(
                 "Garmin Connect está bloqueando las peticiones (429 Too Many Requests). "
                 "Espera unas horas antes de volver a intentarlo."
