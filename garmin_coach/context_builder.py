@@ -13,29 +13,60 @@ from __future__ import annotations
 from statistics import mean
 from typing import Any, Iterable
 
-# Campos máximo a conservar de una actividad. Resto se descarta.
+# Campos de carrera alineados con Garmin Connect "Carrera > Estadísticas".
 _ACTIVITY_FIELDS = (
+    # Identidad
     "activityId",
     "activityName",
     "startTimeLocal",
-    "distance",
+    # Tiempo
     "duration",
-    "elapsedDuration",
     "movingDuration",
-    "averageHR",
-    "maxHR",
+    "elapsedDuration",
+    # Distancia y velocidad
+    "distance",
     "averageSpeed",
     "maxSpeed",
+    # Frecuencia cardiaca
+    "averageHR",
+    "maxHR",
+    # Calorías
     "calories",
-    "aerobicTrainingEffect",
-    "anaerobicTrainingEffect",
-    "trainingStressScore",
-    "vO2MaxValue",
-    "normPower",
-    "averageRunningCadenceInStepsPerMinute",
-    "averageBikingCadenceInRevPerMinute",
+    "bmrCalories",
+    "activeCalories",
+    # Elevación
     "elevationGain",
     "elevationLoss",
+    "minElevation",
+    "maxElevation",
+    # Training Effect
+    "aerobicTrainingEffect",
+    "anaerobicTrainingEffect",
+    "activityTrainingLoad",
+    "trainingEffectLabel",
+    # Stamina
+    "beginningPotentialStamina",
+    "endPotentialStamina",
+    "minAvailableStamina",
+    # Potencia de carrera
+    "avgPower",
+    "maxPower",
+    # Dinámica de carrera
+    "averageRunningCadenceInStepsPerMinute",
+    "maxRunningCadenceInStepsPerMinute",
+    "avgStrideLength",
+    "avgVerticalRatio",
+    "avgVerticalOscillation",
+    "avgGroundContactTime",
+    # Hidratación
+    "estimatedSweatLoss",
+    # Temperatura
+    "avgTemperature",
+    "minTemperature",
+    "maxTemperature",
+    # Minutos de intensidad
+    "moderateIntensityMinutes",
+    "vigorousIntensityMinutes",
 )
 
 

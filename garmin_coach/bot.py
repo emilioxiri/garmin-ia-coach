@@ -5,6 +5,7 @@ Bot de Telegram con conversación libre, comandos y memoria.
 
 import logging
 import os
+import re
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -19,6 +20,18 @@ from garmin_coach.db import get_last_sync, log_sync, save_memory, get_context_fo
 import json
 
 logger = logging.getLogger(__name__)
+
+
+def format_for_telegram(text: str) -> str:
+    """Convert LLM markdown output to Telegram legacy Markdown.
+
+    LLMs emit **bold** and ## headers which Telegram does not render.
+    Converts to Telegram-compatible *bold* and strips heading symbols.
+    """
+    text = text.replace("**", "*")
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    return text
+
 
 # Sesiones activas por usuario
 _sessions: dict[int, CoachSession] = {}
@@ -106,7 +119,11 @@ async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🤔 Generando tu briefing personalizado...")
     loop = asyncio.get_event_loop()
     briefing = await loop.run_in_executor(None, generate_daily_briefing, moment)
-    await msg.edit_text(briefing)
+    formatted = format_for_telegram(briefing)
+    try:
+        await msg.edit_text(formatted, parse_mode="Markdown")
+    except Exception:
+        await msg.edit_text(briefing)
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,14 +185,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     response = session.chat(user_message)
+    formatted = format_for_telegram(response)
 
     # Telegram tiene límite de 4096 chars por mensaje
-    if len(response) > 4000:
-        parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
+    if len(formatted) > 4000:
+        parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
         for part in parts:
-            await update.message.reply_text(part)
+            try:
+                await update.message.reply_text(part, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(part)
     else:
-        await update.message.reply_text(response)
+        try:
+            await update.message.reply_text(formatted, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(response)
 
 
 # ── Setup del bot ──────────────────────────────────────────────────────────────

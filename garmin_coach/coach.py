@@ -33,7 +33,12 @@ Cuando no tengas datos suficientes, dilo claramente y pide más información.
 
 Si el atleta menciona sensaciones, lesiones o estado de ánimo, tenlo en cuenta y guárdalo como contexto importante.
 
-Formato de respuesta: usa texto claro, con emojis ocasionales para hacer más visual la información. Si tienes que listar datos, usa formato limpio."""
+Formato de respuesta:
+- Respuestas CORTAS: máximo 6-8 líneas. Sin relleno.
+- Usa emojis puntuales para visualizar.
+- Para listas usa guión (-).
+- Para negrita usa *asterisco simple* (formato Telegram).
+- NUNCA uses dobles asteriscos (**), almohadillas (#) ni encabezados markdown."""
 
 
 class CoachSession:
@@ -62,7 +67,7 @@ class CoachSession:
         try:
             response = client.chat.completions.create(
                 model=MODEL,
-                max_tokens=1500,
+                max_tokens=600,
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}] + self.history,
             )
             assistant_message = response.choices[0].message.content
@@ -108,7 +113,7 @@ def generate_daily_briefing(moment: str = "morning") -> str:
     try:
         response = client.chat.completions.create(
             model=MODEL,
-            max_tokens=1000,
+            max_tokens=500,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},

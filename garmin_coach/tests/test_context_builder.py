@@ -35,6 +35,9 @@ def test_slim_activity_keeps_relevant_fields():
         "averageSpeed": 3.33,
         "calories": 700,
         "vO2MaxValue": 55.6,
+        "normPower": 300,
+        "trainingStressScore": 80,
+        "averageBikingCadenceInRevPerMinute": 90,
         "splits": [{"distance": 1000} for _ in range(20)],
         "hrZones": [{"zone": 1}],
         "polyline": "x" * 5000,
@@ -46,6 +49,63 @@ def test_slim_activity_keeps_relevant_fields():
     assert "splits" not in slim
     assert "hrZones" not in slim
     assert "polyline" not in slim
+    # Fields removed from running profile
+    assert "vO2MaxValue" not in slim
+    assert "normPower" not in slim
+    assert "trainingStressScore" not in slim
+    assert "averageBikingCadenceInRevPerMinute" not in slim
+
+
+def test_slim_activity_includes_running_dynamics():
+    raw = {
+        "activityId": "1",
+        "avgStrideLength": 1.06,
+        "avgVerticalRatio": 8.1,
+        "avgVerticalOscillation": 8.5,
+        "avgGroundContactTime": 245,
+        "averageRunningCadenceInStepsPerMinute": 177,
+        "maxRunningCadenceInStepsPerMinute": 192,
+        "avgPower": 308,
+        "maxPower": 417,
+        "beginningPotentialStamina": 100,
+        "endPotentialStamina": 59,
+        "minAvailableStamina": 53,
+        "activityTrainingLoad": 218,
+        "trainingEffectLabel": "Umbral (Aeróbica alta)",
+        "bmrCalories": 65,
+        "activeCalories": 593,
+        "estimatedSweatLoss": 798,
+        "avgTemperature": 25,
+        "minTemperature": 24,
+        "maxTemperature": 29,
+        "moderateIntensityMinutes": 2,
+        "vigorousIntensityMinutes": 44,
+        "minElevation": 27,
+        "maxElevation": 43,
+    }
+    slim = slim_activity(raw)
+    assert slim["avgStrideLength"] == 1.06
+    assert slim["avgVerticalRatio"] == 8.1
+    assert slim["avgVerticalOscillation"] == 8.5
+    assert slim["avgGroundContactTime"] == 245
+    assert slim["maxRunningCadenceInStepsPerMinute"] == 192
+    assert slim["avgPower"] == 308
+    assert slim["maxPower"] == 417
+    assert slim["beginningPotentialStamina"] == 100
+    assert slim["endPotentialStamina"] == 59
+    assert slim["minAvailableStamina"] == 53
+    assert slim["activityTrainingLoad"] == 218
+    assert slim["trainingEffectLabel"] == "Umbral (Aeróbica alta)"
+    assert slim["bmrCalories"] == 65
+    assert slim["activeCalories"] == 593
+    assert slim["estimatedSweatLoss"] == 798
+    assert slim["avgTemperature"] == 25
+    assert slim["minTemperature"] == 24
+    assert slim["maxTemperature"] == 29
+    assert slim["moderateIntensityMinutes"] == 2
+    assert slim["vigorousIntensityMinutes"] == 44
+    assert slim["minElevation"] == 27
+    assert slim["maxElevation"] == 43
 
 
 def test_slim_activity_extracts_type_key_from_dict():
