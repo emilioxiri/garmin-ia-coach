@@ -25,15 +25,15 @@ def make_mock_client(activities=None):
 # ── date window ───────────────────────────────────────────────────────────────
 
 def test_sync_uses_30_days_when_db_empty():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     mock_client = make_mock_client()
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         sync_all("email", "pass", days=30)
 
@@ -43,7 +43,7 @@ def test_sync_uses_30_days_when_db_empty():
 
 
 def test_sync_uses_last_db_date_when_not_empty():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     last_date = (date.today() - timedelta(days=5)).isoformat()
@@ -52,9 +52,9 @@ def test_sync_uses_last_db_date_when_not_empty():
     mock_client = make_mock_client()
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         sync_all("email", "pass", days=30)
 
@@ -63,7 +63,7 @@ def test_sync_uses_last_db_date_when_not_empty():
 
 
 def test_sync_calls_purge_before_fetching():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     mock_client = make_mock_client()
@@ -80,10 +80,10 @@ def test_sync_calls_purge_before_fetching():
     mock_client.get_activities_by_date.side_effect = fake_get_activities
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
-        patch("db.purge_old_data", side_effect=fake_purge),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
+        patch("garmin_coach.db.purge_old_data", side_effect=fake_purge),
     ):
         sync_all("email", "pass", days=30)
 
@@ -93,7 +93,7 @@ def test_sync_calls_purge_before_fetching():
 # ── activity storage ──────────────────────────────────────────────────────────
 
 def test_sync_stores_all_activity_fields_from_api():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     activity = {
@@ -111,9 +111,9 @@ def test_sync_stores_all_activity_fields_from_api():
     mock_client = make_mock_client(activities=[activity])
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         sync_all("email", "pass", days=30)
 
@@ -129,7 +129,7 @@ def test_sync_stores_all_activity_fields_from_api():
 
 
 def test_sync_merges_detailed_activity_metrics():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     activity = {
@@ -147,9 +147,9 @@ def test_sync_merges_detailed_activity_metrics():
     mock_client.get_activity.return_value = details
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         sync_all("email", "pass", days=30)
 
@@ -159,7 +159,7 @@ def test_sync_merges_detailed_activity_metrics():
 
 
 def test_sync_continues_when_activity_details_fail():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     activity = {
@@ -171,9 +171,9 @@ def test_sync_continues_when_activity_details_fail():
     mock_client.get_activity.side_effect = Exception("API error")
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         result = sync_all("email", "pass", days=30)
 
@@ -183,15 +183,15 @@ def test_sync_continues_when_activity_details_fail():
 # ── summary ───────────────────────────────────────────────────────────────────
 
 def test_sync_summary_includes_purged():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     mock_client = make_mock_client()
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         result = sync_all("email", "pass", days=30)
 
@@ -199,7 +199,7 @@ def test_sync_summary_includes_purged():
 
 
 def test_sync_stores_sleep_records():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     mock_client = make_mock_client()
@@ -216,9 +216,9 @@ def test_sync_stores_sleep_records():
     }
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         result = sync_all("email", "pass", days=1)
 
@@ -230,7 +230,7 @@ def test_sync_stores_sleep_records():
 
 
 def test_sync_stores_hrv_records():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     mock_client = make_mock_client()
@@ -245,9 +245,9 @@ def test_sync_stores_hrv_records():
     }
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         result = sync_all("email", "pass", days=1)
 
@@ -258,7 +258,7 @@ def test_sync_stores_hrv_records():
 
 
 def test_sync_stores_body_battery_records():
-    from garmin_sync import sync_all
+    from garmin_coach.garmin_sync import sync_all
 
     db_inst = make_db()
     mock_client = make_mock_client()
@@ -267,9 +267,9 @@ def test_sync_stores_body_battery_records():
     ]
 
     with (
-        patch("garmin_sync.get_garmin_client", return_value=mock_client),
-        patch("garmin_sync.get_db", return_value=db_inst),
-        patch("db._db_instance", db_inst),
+        patch("garmin_coach.garmin_sync.get_garmin_client", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.get_db", return_value=db_inst),
+        patch("garmin_coach.db._db_instance", db_inst),
     ):
         result = sync_all("email", "pass", days=1)
 
@@ -282,7 +282,7 @@ def test_sync_stores_body_battery_records():
 # ── get_garmin_client ─────────────────────────────────────────────────────────
 
 def test_get_garmin_client_reuses_session_when_exists(tmp_path):
-    import garmin_sync
+    import garmin_coach.garmin_sync as garmin_sync
 
     session_path = tmp_path / "session.json"
     session_path.write_text("{}")  # file must exist for .exists() to return True
@@ -291,8 +291,8 @@ def test_get_garmin_client_reuses_session_when_exists(tmp_path):
     mock_client.login.return_value = None
 
     with (
-        patch("garmin_sync.Garmin", return_value=mock_client),
-        patch("garmin_sync.SESSION_PATH", session_path),
+        patch("garmin_coach.garmin_sync.Garmin", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.SESSION_PATH", session_path),
     ):
         result = garmin_sync.get_garmin_client("email", "pass")
 
@@ -301,7 +301,7 @@ def test_get_garmin_client_reuses_session_when_exists(tmp_path):
 
 
 def test_get_garmin_client_full_login_when_no_session(tmp_path):
-    import garmin_sync
+    import garmin_coach.garmin_sync as garmin_sync
 
     session_path = tmp_path / "session.json"
     mock_client = MagicMock()
@@ -309,8 +309,8 @@ def test_get_garmin_client_full_login_when_no_session(tmp_path):
     mock_client.client.dump.return_value = None
 
     with (
-        patch("garmin_sync.Garmin", return_value=mock_client),
-        patch("garmin_sync.SESSION_PATH", session_path),
+        patch("garmin_coach.garmin_sync.Garmin", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.SESSION_PATH", session_path),
     ):
         result = garmin_sync.get_garmin_client("email", "pass")
 
@@ -320,7 +320,7 @@ def test_get_garmin_client_full_login_when_no_session(tmp_path):
 
 
 def test_get_garmin_client_falls_back_to_full_login_when_session_expired(tmp_path):
-    import garmin_sync
+    import garmin_coach.garmin_sync as garmin_sync
 
     session_path = tmp_path / "session.json"
     session_path.write_text("{}")
@@ -330,8 +330,8 @@ def test_get_garmin_client_falls_back_to_full_login_when_session_expired(tmp_pat
     mock_client.client.dump.return_value = None
 
     with (
-        patch("garmin_sync.Garmin", return_value=mock_client),
-        patch("garmin_sync.SESSION_PATH", session_path),
+        patch("garmin_coach.garmin_sync.Garmin", return_value=mock_client),
+        patch("garmin_coach.garmin_sync.SESSION_PATH", session_path),
     ):
         result = garmin_sync.get_garmin_client("email", "pass")
 
@@ -342,7 +342,7 @@ def test_get_garmin_client_falls_back_to_full_login_when_session_expired(tmp_pat
 # ── module-level state setters ────────────────────────────────────────────────
 
 def test_set_bot_app_updates_global():
-    import garmin_sync
+    import garmin_coach.garmin_sync as garmin_sync
 
     fake_app = MagicMock()
     garmin_sync.set_bot_app(fake_app)
@@ -350,7 +350,7 @@ def test_set_bot_app_updates_global():
 
 
 def test_set_event_loop_updates_global():
-    import garmin_sync
+    import garmin_coach.garmin_sync as garmin_sync
     import asyncio
 
     loop = asyncio.new_event_loop()
@@ -362,7 +362,7 @@ def test_set_event_loop_updates_global():
 
 
 def test_provide_mfa_code_sets_code_and_event():
-    import garmin_sync
+    import garmin_coach.garmin_sync as garmin_sync
 
     garmin_sync._mfa_event.clear()
     garmin_sync._mfa_code = None

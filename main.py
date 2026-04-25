@@ -32,10 +32,10 @@ def scheduled_sync_and_briefing(app, moment: str):
     Se ejecuta en un hilo separado, por eso usamos asyncio.run_coroutine_threadsafe.
     """
     import os
-    from garmin_sync import sync_all
-    from db import log_sync
-    from coach import generate_daily_briefing
-    from bot import send_scheduled_message
+    from garmin_coach.garmin_sync import sync_all
+    from garmin_coach.db import log_sync
+    from garmin_coach.coach import generate_daily_briefing
+    from garmin_coach.bot import send_scheduled_message
 
     logger.info(f"⏰ Sync programado ({moment}) iniciado")
 
@@ -50,7 +50,7 @@ def scheduled_sync_and_briefing(app, moment: str):
         logger.error(f"❌ Error en sync programado: {e}")
 
     try:
-        from garmin_sync import _bot_loop
+        from garmin_coach.garmin_sync import _bot_loop
         briefing = generate_daily_briefing(moment)
         if _bot_loop and _bot_loop.is_running():
             asyncio.run_coroutine_threadsafe(
@@ -82,8 +82,8 @@ def start_scheduler(app):
 
 
 def main():
-    from bot import build_application
-    from garmin_sync import set_bot_app
+    from garmin_coach.bot import build_application
+    from garmin_coach.garmin_sync import set_bot_app
 
     logger.info("🚀 Iniciando Garmin Coach Bot...")
 

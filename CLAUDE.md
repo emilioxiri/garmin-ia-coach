@@ -17,17 +17,15 @@ python main.py
 ruff check .
 ruff format .
 
-# Docker (primary deployment method)
-docker-compose up -d --build
-docker-compose logs -f
-docker-compose down
+# Docker (primary deployment method — run from docker/ folder)
+cd docker && docker-compose up -d --build
+cd docker && docker-compose logs -f
+cd docker && docker-compose down
 
 # Add/remove dependencies
 poetry add <package>
 poetry remove <package>
 ```
-
-No test suite exists yet. When adding tests, use `pytest` and run with `python -m pytest`.
 
 ## Architecture
 
@@ -36,14 +34,18 @@ Single-process app with two concurrent subsystems:
 1. **Telegram bot** (`python-telegram-bot` async polling) — main thread
 2. **Scheduler** (`schedule` lib) — daemon background thread, fires sync+briefing at configured times
 
-The two subsystems share state via globals in `garmin_sync.py` (`_bot_loop`, `_bot_app`) to allow the scheduler thread to post messages via the bot's asyncio loop using `asyncio.run_coroutine_threadsafe`.
+The two subsystems share state via globals in `garmin_coach/garmin_sync.py` (`_bot_loop`, `_bot_app`) to allow the scheduler thread to post messages via the bot's asyncio loop using `asyncio.run_coroutine_threadsafe`.
+
+### Package structure
+
+All modules (except `main.py`) live in the `garmin_coach/` package. Tests are in `garmin_coach/tests/`.
 
 ### Data flow
 
 ```
-Garmin Connect API → garmin_sync.py → TinyDB (data/garmin_coach.json)
-                                           ↓
-                                       db.py → coach.py (Groq/Llama) → bot.py → Telegram
+Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach.json)
+                                                         ↓
+                                           garmin_coach/db.py → garmin_coach/coach.py (Groq/Llama) → garmin_coach/bot.py → Telegram
 ```
 
 ### Module responsibilities
@@ -51,10 +53,10 @@ Garmin Connect API → garmin_sync.py → TinyDB (data/garmin_coach.json)
 | File | Role |
 |------|------|
 | `main.py` | Entry point; wires bot + scheduler; scheduler runs `sync_all` then `generate_daily_briefing` |
-| `bot.py` | All Telegram handlers; per-user `CoachSession` stored in `_sessions` dict |
-| `coach.py` | `CoachSession` class (in-memory conversation history, max 40 messages); `generate_daily_briefing` for scheduled messages; uses Groq API with `llama-3.3-70b-versatile` |
-| `garmin_sync.py` | Garmin auth with session persistence at `/data/garmin_session.json`; MFA flow via Telegram (`/mfa` command + threading.Event); `sync_all` fetches activities, sleep, HRV, body battery |
-| `db.py` | TinyDB singleton; tables: `activities`, `sleep`, `hrv`, `body_battery`, `memory`, `sync_log`; `get_context_for_ai` is the main query used by the coach |
+| `garmin_coach/bot.py` | All Telegram handlers; per-user `CoachSession` stored in `_sessions` dict |
+| `garmin_coach/coach.py` | `CoachSession` class (in-memory conversation history, max 40 messages); `generate_daily_briefing` for scheduled messages; uses Groq API with `llama-3.3-70b-versatile` |
+| `garmin_coach/garmin_sync.py` | Garmin auth with session persistence at `/data/garmin_session.json`; MFA flow via Telegram (`/mfa` command + threading.Event); `sync_all` fetches activities, sleep, HRV, body battery |
+| `garmin_coach/db.py` | TinyDB singleton; tables: `activities`, `sleep`, `hrv`, `body_battery`, `memory`, `sync_log`; `get_context_for_ai` is the main query used by the coach |
 
 ### TinyDB schema notes
 
@@ -89,16 +91,14 @@ Garmin Connect sometimes requires MFA. Flow: sync thread blocks on `threading.Ev
 Minimun coverage allowed: 85%. Unit test are a MUST.
 
 ```bash
-python -m pytest tests/ -v
+python -m pytest garmin_coach/tests/ -v
 ```
-
-pytest not in pyproject.toml yet — install with `pip install pytest` if missing in venv.
 
 ## Active specs
 
 All specs implemented. See `docs/implementations/` for technical details.
 
-## Implemented: smart sync window + purge (`db.py`, `garmin_sync.py`)
+## Implemented: smart sync window + purge (`garmin_coach/db.py`, `garmin_coach/garmin_sync.py`)
 
 - `purge_old_data(days)` — removes records older than N days from all tables at start of sync
 - `is_db_empty()` — True if all four data tables empty

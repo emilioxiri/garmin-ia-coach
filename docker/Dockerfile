@@ -34,11 +34,12 @@ RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-interaction --no-ansi --no-root
 
 # Copiar código fuente
-COPY *.py ./
+COPY main.py ./
+COPY garmin_coach/ ./garmin_coach/
 
 # Volumen para datos persistentes
 VOLUME ["/data"]
 
-RUN mkdir -p /data/logs
+RUN mkdir -p /data/logs && rm -rf ./garmin_coach/tests
 
 CMD ["/usr/local/bin/python", "main.py"]

@@ -13,9 +13,9 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
-from coach import CoachSession, generate_daily_briefing
-from garmin_sync import sync_all, provide_mfa_code, set_event_loop
-from db import get_last_sync, log_sync, save_memory, get_context_for_ai
+from garmin_coach.coach import CoachSession, generate_daily_briefing
+from garmin_coach.garmin_sync import sync_all, provide_mfa_code, set_event_loop
+from garmin_coach.db import get_last_sync, log_sync, save_memory, get_context_for_ai
 import json
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_resetsession(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
-    from garmin_sync import SESSION_PATH
+    from garmin_coach.garmin_sync import SESSION_PATH
     if SESSION_PATH.exists():
         SESSION_PATH.unlink()
         await update.message.reply_text("🗑 Sesión de Garmin eliminada. El próximo /sync hará login completo.")

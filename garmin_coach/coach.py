@@ -7,7 +7,7 @@ Mantiene historial de conversación en memoria durante la sesión.
 import json
 import logging
 from groq import Groq
-from db import get_context_for_ai, save_memory
+from garmin_coach.db import get_context_for_ai, save_memory
 
 logger = logging.getLogger(__name__)
 

@@ -12,20 +12,20 @@ def make_db():
 
 
 def patch_db(db_instance):
-    return patch("db._db_instance", db_instance)
+    return patch("garmin_coach.db._db_instance", db_instance)
 
 
 # ── is_db_empty ───────────────────────────────────────────────────────────────
 
 def test_is_db_empty_true_when_no_data():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         assert db.is_db_empty() is True
 
 
 def test_is_db_empty_false_when_has_activity():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("activities").insert({"activityId": "1", "startTimeLocal": "2024-01-01 10:00:00"})
     with patch_db(db_inst):
@@ -33,7 +33,7 @@ def test_is_db_empty_false_when_has_activity():
 
 
 def test_is_db_empty_false_when_has_sleep():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("sleep").insert({"date": "2024-01-01"})
     with patch_db(db_inst):
@@ -43,14 +43,14 @@ def test_is_db_empty_false_when_has_sleep():
 # ── get_last_date_in_db ───────────────────────────────────────────────────────
 
 def test_get_last_date_in_db_none_when_empty():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         assert db.get_last_date_in_db() is None
 
 
 def test_get_last_date_in_db_from_activities():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("activities").insert({"startTimeLocal": "2024-01-10 08:00:00"})
     db_inst.table("activities").insert({"startTimeLocal": "2024-01-20 09:00:00"})
@@ -59,7 +59,7 @@ def test_get_last_date_in_db_from_activities():
 
 
 def test_get_last_date_in_db_from_sleep():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("sleep").insert({"date": "2024-01-15"})
     db_inst.table("sleep").insert({"date": "2024-01-22"})
@@ -68,7 +68,7 @@ def test_get_last_date_in_db_from_sleep():
 
 
 def test_get_last_date_in_db_max_across_tables():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("activities").insert({"startTimeLocal": "2024-01-20 10:00:00"})
     db_inst.table("sleep").insert({"date": "2024-01-18"})
@@ -79,7 +79,7 @@ def test_get_last_date_in_db_max_across_tables():
 
 
 def test_get_last_date_in_db_skips_empty_fields():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("activities").insert({"startTimeLocal": ""})
     db_inst.table("sleep").insert({"date": "2024-01-10"})
@@ -90,7 +90,7 @@ def test_get_last_date_in_db_skips_empty_fields():
 # ── purge_old_data ────────────────────────────────────────────────────────────
 
 def test_purge_removes_old_activities():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     cutoff = date.today() - timedelta(days=30)
     old_date = (cutoff - timedelta(days=1)).isoformat()
@@ -105,7 +105,7 @@ def test_purge_removes_old_activities():
 
 
 def test_purge_removes_old_sleep():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     cutoff = date.today() - timedelta(days=30)
     old_date = (cutoff - timedelta(days=1)).isoformat()
@@ -120,7 +120,7 @@ def test_purge_removes_old_sleep():
 
 
 def test_purge_removes_old_hrv_and_body_battery():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     cutoff = date.today() - timedelta(days=30)
     old_date = (cutoff - timedelta(days=5)).isoformat()
@@ -137,7 +137,7 @@ def test_purge_removes_old_hrv_and_body_battery():
 
 
 def test_purge_keeps_cutoff_date_itself():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     cutoff = (date.today() - timedelta(days=30)).isoformat()
     db_inst.table("sleep").insert({"date": cutoff})
@@ -148,7 +148,7 @@ def test_purge_keeps_cutoff_date_itself():
 
 
 def test_purge_returns_removed_counts():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     cutoff = date.today() - timedelta(days=30)
     old_date = (cutoff - timedelta(days=1)).isoformat()
@@ -164,7 +164,7 @@ def test_purge_returns_removed_counts():
 
 
 def test_purge_empty_db_returns_zeros():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         removed = db.purge_old_data(days=30)
@@ -174,7 +174,7 @@ def test_purge_empty_db_returns_zeros():
 # ── get_context_for_ai ────────────────────────────────────────────────────────
 
 def test_get_context_for_ai_returns_all_keys():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         ctx = db.get_context_for_ai(days=7)
@@ -183,7 +183,7 @@ def test_get_context_for_ai_returns_all_keys():
 
 
 def test_get_context_for_ai_filters_old_activities():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     cutoff = date.today() - timedelta(days=7)
     old = (cutoff - timedelta(days=1)).isoformat()
@@ -197,7 +197,7 @@ def test_get_context_for_ai_filters_old_activities():
 
 
 def test_get_context_for_ai_caps_at_20_activities():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     today = date.today().isoformat()
     for i in range(25):
@@ -208,7 +208,7 @@ def test_get_context_for_ai_caps_at_20_activities():
 
 
 def test_get_context_for_ai_activities_sorted_descending():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     today = date.today()
     for i in range(3):
@@ -221,7 +221,7 @@ def test_get_context_for_ai_activities_sorted_descending():
 
 
 def test_get_context_for_ai_includes_all_memory():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("memory").insert({"note": "rodilla derecha", "created_at": "2020-01-01"})
     db_inst.table("memory").insert({"note": "lesión antigua", "created_at": "2019-01-01"})
@@ -231,7 +231,7 @@ def test_get_context_for_ai_includes_all_memory():
 
 
 def test_get_context_for_ai_filters_sleep_hrv_bb():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     cutoff = date.today() - timedelta(days=7)
     old = (cutoff - timedelta(days=1)).isoformat()
@@ -249,7 +249,7 @@ def test_get_context_for_ai_filters_sleep_hrv_bb():
 # ── save_memory ───────────────────────────────────────────────────────────────
 
 def test_save_memory_inserts_note():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         db.save_memory("rodilla derecha molesta")
@@ -259,7 +259,7 @@ def test_save_memory_inserts_note():
 
 
 def test_save_memory_stores_created_at():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         db.save_memory("test note")
@@ -269,7 +269,7 @@ def test_save_memory_stores_created_at():
 
 
 def test_save_memory_multiple_notes_append():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         db.save_memory("nota 1")
@@ -280,14 +280,14 @@ def test_save_memory_multiple_notes_append():
 # ── get_last_sync / log_sync ──────────────────────────────────────────────────
 
 def test_get_last_sync_none_when_empty():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         assert db.get_last_sync() is None
 
 
 def test_get_last_sync_returns_latest():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     db_inst.table("sync_log").insert({"synced_at": "2024-01-10T08:00:00", "summary": {}})
     db_inst.table("sync_log").insert({"synced_at": "2024-01-20T08:00:00", "summary": {}})
@@ -298,7 +298,7 @@ def test_get_last_sync_returns_latest():
 
 
 def test_log_sync_inserts_record():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     summary = {"activities": 5, "sleep": 3}
     with patch_db(db_inst):
@@ -309,7 +309,7 @@ def test_log_sync_inserts_record():
 
 
 def test_log_sync_stores_synced_at():
-    import db
+    import garmin_coach.db as db
     db_inst = make_db()
     with patch_db(db_inst):
         db.log_sync({})

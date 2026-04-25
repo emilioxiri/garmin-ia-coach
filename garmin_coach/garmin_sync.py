@@ -12,7 +12,7 @@ from datetime import date, timedelta, datetime, timezone
 from pathlib import Path
 
 from garminconnect import Garmin
-from db import get_db
+from garmin_coach.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     si ya tiene datos descarga sólo desde el último registro hasta hoy.
     Purga registros con más de `days` días de antigüedad antes de sincronizar.
     """
-    from db import is_db_empty, get_last_date_in_db, purge_old_data
+    from garmin_coach.db import is_db_empty, get_last_date_in_db, purge_old_data
 
     client = get_garmin_client(email, password)
     db = get_db()

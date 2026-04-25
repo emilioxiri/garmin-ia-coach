@@ -30,10 +30,10 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["garmin_coach/tests"]
 
 [tool.coverage.run]
-omit = ["bot.py", "main.py", "tests/*"]
+omit = ["garmin_coach/bot.py", "main.py", "garmin_coach/tests/*"]
 
 [tool.coverage.report]
 fail_under = 85

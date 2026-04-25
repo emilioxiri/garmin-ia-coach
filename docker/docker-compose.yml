@@ -1,12 +1,14 @@
 services:
   garmin-coach:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: garmin-coach
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
     volumes:
-      - ./data:/data          # Base de datos TinyDB + logs
+      - ../data:/data          # Base de datos TinyDB + logs
     environment:
       - TZ=Europe/Madrid
     logging:
