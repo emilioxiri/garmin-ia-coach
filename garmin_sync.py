@@ -104,15 +104,29 @@ def get_garmin_client(email: str, password: str) -> Garmin:
 
 def sync_all(email: str, password: str, days: int = 30) -> dict:
     """
-    Sincroniza todos los datos de los últimos `days` días.
-    Devuelve un resumen de cuántos registros se han guardado/actualizado.
+    Sincroniza datos de Garmin. Si la BD está vacía descarga los últimos `days` días;
+    si ya tiene datos descarga sólo desde el último registro hasta hoy.
+    Purga registros con más de `days` días de antigüedad antes de sincronizar.
     """
+    from db import is_db_empty, get_last_date_in_db, purge_old_data
+
     client = get_garmin_client(email, password)
     db = get_db()
 
     today = date.today()
-    start = today - timedelta(days=days)
-    summary = {"activities": 0, "sleep": 0, "hrv": 0, "body_battery": 0}
+
+    purged = purge_old_data(days=days)
+    logger.info(f"🗑 Datos purgados (>{days}d): {purged}")
+
+    if is_db_empty():
+        start = today - timedelta(days=days)
+        logger.info(f"📭 BD vacía — sincronizando últimos {days} días desde {start}")
+    else:
+        last_date_str = get_last_date_in_db()
+        start = date.fromisoformat(last_date_str)
+        logger.info(f"📬 BD no vacía — sincronizando desde {start} (último registro)")
+
+    summary = {"activities": 0, "sleep": 0, "hrv": 0, "body_battery": 0, "purged": purged}
 
     # ── Actividades ────────────────────────────────────────────────────
     try:
@@ -124,22 +138,16 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
         Act = Query()
         for act in activities:
             act_id = str(act.get("activityId", ""))
-            record = {
-                "activityId": act_id,
-                "name": act.get("activityName"),
-                "type": act.get("activityType", {}).get("typeKey"),
-                "startTime": act.get("startTimeLocal"),
-                "duration_s": act.get("duration"),
-                "distance_m": act.get("distance"),
-                "calories": act.get("calories"),
-                "avgHR": act.get("averageHR"),
-                "maxHR": act.get("maxHR"),
-                "aerobicTE": act.get("aerobicTrainingEffect"),
-                "anaerobicTE": act.get("anaerobicTrainingEffect"),
-                "avgPace": act.get("avgSpeed"),
-                "elevationGain": act.get("elevationGain"),
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-            }
+            # Store full summary dict; try to merge in detailed metrics
+            record = {**act, "activityId": act_id, "synced_at": datetime.now(timezone.utc).isoformat()}
+            try:
+                details = client.get_activity(act_id)
+                for key, value in details.items():
+                    if key not in record:
+                        record[key] = value
+            except Exception as detail_err:
+                logger.debug(f"No se pudieron obtener detalles de actividad {act_id}: {detail_err}")
+
             if act_table.search(Act.activityId == act_id):
                 act_table.update(record, Act.activityId == act_id)
             else:
