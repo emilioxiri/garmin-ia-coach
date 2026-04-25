@@ -56,7 +56,8 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 | `garmin_coach/bot.py` | All Telegram handlers; per-user `CoachSession` stored in `_sessions` dict |
 | `garmin_coach/coach.py` | `CoachSession` class (in-memory conversation history, max 40 messages); `generate_daily_briefing` for scheduled messages; uses Groq API with `llama-3.3-70b-versatile` |
 | `garmin_coach/garmin_sync.py` | Garmin auth with session persistence at `/data/garmin_session.json`; MFA flow via Telegram (`/mfa` command + threading.Event); `sync_all` fetches activities, sleep, HRV, body battery |
-| `garmin_coach/db.py` | TinyDB singleton; tables: `activities`, `sleep`, `hrv`, `body_battery`, `memory`, `sync_log`; `get_context_for_ai` is the main query used by the coach |
+| `garmin_coach/db.py` | TinyDB singleton; tables: `activities`, `sleep`, `hrv`, `body_battery`, `memory`, `sync_log`; `get_context_for_ai` returns raw lists; `get_compact_context_for_ai` wraps it with `context_builder` for LLM use |
+| `garmin_coach/context_builder.py` | `slim_*` projections + `aggregate_series` + `build_context` to compact TinyDB records before sending to Groq (avoids `context_length_exceeded`) |
 
 ### TinyDB schema notes
 
@@ -97,6 +98,13 @@ python -m pytest garmin_coach/tests/ -v
 ## Active specs
 
 All specs implemented. See `docs/implementations/` for technical details.
+
+## Implemented: LLM context slimming (`garmin_coach/context_builder.py`, `garmin_coach/db.py`, `garmin_coach/coach.py`)
+
+- `coach.py` ahora consume `get_compact_context_for_ai(days=7)` en `CoachSession.chat` y `generate_daily_briefing` para evitar `context_length_exceeded` de Groq tras enriquecer el sync.
+- `context_builder.build_context` aplica `slim_*` por tabla (descarta `splits`, `hrZones`, `maxMetrics`, polylines) y `aggregate_series` para resumir series numéricas (last/mean/min/max/n).
+- `db.get_context_for_ai` sigue devolviendo registros raw (lo usa `bot.cmd_status` para conteos).
+- Detalle: `docs/implementations/llm_context_slimming.md`. Plan original con 3 opciones (incluida tool calling C como evolución futura): `docs/implementations/llm_context_slimming_plan.md`.
 
 ## Implemented: smart sync window + purge (`garmin_coach/db.py`, `garmin_coach/garmin_sync.py`)
 

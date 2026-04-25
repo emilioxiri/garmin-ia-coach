@@ -106,6 +106,17 @@ def get_context_for_ai(days: int = 14) -> dict:
     }
 
 
+def get_compact_context_for_ai(days: int = 7, max_activities: int = 10) -> dict:
+    """Versión compacta de `get_context_for_ai` pensada para enviar al LLM.
+
+    Aplica las proyecciones de `garmin_coach.context_builder` para reducir el tamaño
+    del JSON inyectado en el prompt y evitar `context_length_exceeded`.
+    """
+    from garmin_coach.context_builder import build_context
+    raw = get_context_for_ai(days=days)
+    return build_context(raw, max_activities=max_activities)
+
+
 def is_db_empty() -> bool:
     """Return True if no fitness data exists across all data tables."""
     db = get_db()

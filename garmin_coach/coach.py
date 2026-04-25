@@ -7,7 +7,7 @@ Mantiene historial de conversación en memoria durante la sesión.
 import json
 import logging
 from groq import Groq
-from garmin_coach.db import get_context_for_ai, save_memory
+from garmin_coach.db import get_compact_context_for_ai, save_memory
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ client = Groq()
 
 MODEL = "llama-3.3-70b-versatile"
 
-SYSTEM_PROMPT = """Eres un entrenador personal de alto rendimiento especializado en triatlón, running, ciclismo y deportes de resistencia. Tienes acceso en tiempo real a los datos fisiológicos y de entrenamiento del atleta extraídos de su dispositivo Garmin.
+SYSTEM_PROMPT = """Eres un entrenador personal de alto rendimiento especializado en running. Tienes acceso en tiempo real a los datos fisiológicos y de entrenamiento del atleta extraídos de su dispositivo Garmin Fenix 8.
 
 Tu personalidad:
 - Directo, motivador, basado en datos
@@ -48,10 +48,10 @@ class CoachSession:
         Si include_garmin_data=True, inyecta el contexto de Garmin en el primer mensaje.
         """
         if not self.history and include_garmin_data:
-            context = get_context_for_ai(days=14)
+            context = get_compact_context_for_ai(days=7)
             enriched_message = (
-                f"[DATOS GARMIN ACTUALIZADOS - últimos 14 días]\n"
-                f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
+                f"[DATOS GARMIN ACTUALIZADOS - últimos 7 días, formato compacto]\n"
+                f"{json.dumps(context, ensure_ascii=False)}\n\n"
                 f"[MENSAJE DEL ATLETA]\n{user_message}"
             )
         else:
@@ -86,7 +86,7 @@ def generate_daily_briefing(moment: str = "morning") -> str:
     Genera un briefing automático (mañana/noche) sin interacción del usuario.
     moment: 'morning' o 'evening'
     """
-    context = get_context_for_ai(days=7)
+    context = get_compact_context_for_ai(days=7)
 
     if moment == "morning":
         prompt = (
@@ -94,7 +94,7 @@ def generate_daily_briefing(moment: str = "morning") -> str:
             "1. Estado de recuperación (HRV, sueño, Body Battery)\n"
             "2. Recomendación para el entrenamiento de hoy\n"
             "3. Una frase motivadora personalizada basada en mi progreso reciente\n\n"
-            f"[DATOS]\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+            f"[DATOS]\n{json.dumps(context, ensure_ascii=False)}"
         )
     else:
         prompt = (
@@ -102,7 +102,7 @@ def generate_daily_briefing(moment: str = "morning") -> str:
             "1. Valoración del entrenamiento de hoy (si lo hay)\n"
             "2. Análisis de recuperación para esta noche\n"
             "3. Recomendaciones para mañana\n\n"
-            f"[DATOS]\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+            f"[DATOS]\n{json.dumps(context, ensure_ascii=False)}"
         )
 
     try:
