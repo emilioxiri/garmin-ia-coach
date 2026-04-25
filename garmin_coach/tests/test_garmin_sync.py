@@ -136,11 +136,16 @@ def test_sync_merges_detailed_activity_metrics():
         "activityId": 99,
         "activityName": "Bike",
         "startTimeLocal": date.today().isoformat() + " 09:00:00",
+        "verticalOscillation": None,
     }
     details = {
         "activityId": 99,
         "normPower": 220,
         "intensityFactor": 0.85,
+        "summaryDTO": {
+            "verticalOscillation": 8.5,
+            "groundContactTime": 245,
+        },
     }
     mock_client = make_mock_client(activities=[activity])
     mock_client.get_activity.side_effect = None
@@ -156,6 +161,9 @@ def test_sync_merges_detailed_activity_metrics():
     stored = db_inst.table("activities").all()
     assert stored[0]["normPower"] == 220
     assert stored[0]["intensityFactor"] == 0.85
+    # summaryDTO fields flattened and null overwritten
+    assert stored[0]["verticalOscillation"] == 8.5
+    assert stored[0]["groundContactTime"] == 245
 
 
 def test_sync_continues_when_activity_details_fail():

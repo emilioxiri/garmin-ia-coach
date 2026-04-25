@@ -126,7 +126,11 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
         start = date.fromisoformat(last_date_str)
         logger.info(f"📬 BD no vacía — sincronizando desde {start} (último registro)")
 
-    summary = {"activities": 0, "sleep": 0, "hrv": 0, "body_battery": 0, "purged": purged}
+    summary = {
+        "activities": 0, "sleep": 0, "hrv": 0, "body_battery": 0,
+        "training_status": 0, "training_readiness": 0, "respiration": 0, "spo2": 0, "stress": 0,
+        "purged": purged,
+    }
 
     # ── Actividades ────────────────────────────────────────────────────
     try:
@@ -143,10 +147,22 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
             try:
                 details = client.get_activity(act_id)
                 for key, value in details.items():
-                    if key not in record:
+                    if value is not None:
+                        record[key] = value
+                for key, value in details.get("summaryDTO", {}).items():
+                    if value is not None:
                         record[key] = value
             except Exception as detail_err:
                 logger.debug(f"No se pudieron obtener detalles de actividad {act_id}: {detail_err}")
+            try:
+                splits = client.get_activity_splits(act_id)
+                record["splits"] = splits.get("lapDTOs", [])
+            except Exception as e:
+                logger.debug(f"No splits for {act_id}: {e}")
+            try:
+                record["hrZones"] = client.get_activity_hr_in_timezones(act_id)
+            except Exception as e:
+                logger.debug(f"No HR zones for {act_id}: {e}")
 
             if act_table.search(Act.activityId == act_id):
                 act_table.update(record, Act.activityId == act_id)
@@ -256,6 +272,90 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
         logger.info(f"🔋 Body Battery: {summary['body_battery']} registros")
     except Exception as e:
         logger.error(f"❌ Error al obtener Body Battery: {e}")
+
+    # ── Daily wellness metrics ─────────────────────────────────────────────
+    _DAILY_METRICS = [
+        ("training_status",    client.get_training_status,
+         lambda r: r.get("trainingStatusDTO") or (r if r else None)),
+        ("training_readiness", client.get_training_readiness,
+         lambda r: r.get("trainingReadinessDTO") or (r if r else None)),
+        ("respiration",        client.get_respiration_data,
+         lambda r: {k: r[k] for k in ("avgWakingRespirationValue", "avgSleepRespirationValue",
+                                       "highestRespirationValue", "lowestRespirationValue") if r.get(k) is not None} or None),
+        ("spo2",               client.get_spo2_data,
+         lambda r: {k: r[k] for k in ("averageSpO2", "lowestSpO2", "lastSevenDaysAvgSpO2") if r.get(k) is not None} or None),
+        ("stress",             client.get_stress_data,
+         lambda r: {k: r[k] for k in ("avgStressLevel", "maxStressLevel") if r.get(k) is not None} or None),
+    ]
+    from tinydb import Query as _Q
+    DQ = _Q()
+    for table_name, method, extract in _DAILY_METRICS:
+        table = db.table(table_name)
+        current = start
+        while current <= today:
+            day_str = current.isoformat()
+            try:
+                data = extract(method(day_str))
+                if data:
+                    record = {"date": day_str, **data, "synced_at": datetime.now(timezone.utc).isoformat()}
+                    if table.search(DQ.date == day_str):
+                        table.update(record, DQ.date == day_str)
+                    else:
+                        table.insert(record)
+                    summary[table_name] += 1
+            except Exception:
+                pass
+            current += timedelta(days=1)
+        logger.info(f"📈 {table_name}: {summary[table_name]} registros")
+
+    # ── Fitness snapshot (today) ───────────────────────────────────────────
+    today_str = today.isoformat()
+    from tinydb import Query as _Q2
+    SQ = _Q2()
+
+    try:
+        max_m = client.get_max_metrics(today_str)
+        vo2max = None
+        try:
+            metrics_map = max_m.get("allMetrics", {}).get("metricsMap", {})
+            vo2max_list = metrics_map.get("VO2MAX_VALUE", [])
+            if vo2max_list:
+                vo2max = vo2max_list[-1].get("value")
+        except Exception:
+            pass
+        t = db.table("fitness_metrics")
+        r = {"date": today_str, "vo2max": vo2max, "maxMetrics": max_m, "synced_at": datetime.now(timezone.utc).isoformat()}
+        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        logger.info(f"🫀 VO2max: {vo2max}")
+    except Exception as e:
+        logger.debug(f"No max metrics: {e}")
+
+    try:
+        predictions = client.get_race_predictions(start.isoformat(), today_str)
+        t = db.table("race_predictions")
+        r = {"date": today_str, "predictions": predictions, "synced_at": datetime.now(timezone.utc).isoformat()}
+        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        logger.info("🏁 Race predictions actualizadas")
+    except Exception as e:
+        logger.debug(f"No race predictions: {e}")
+
+    try:
+        lt = client.get_lactate_threshold()
+        t = db.table("lactate_threshold")
+        r = {"date": today_str, **lt, "synced_at": datetime.now(timezone.utc).isoformat()}
+        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        logger.info("🧪 Lactate threshold actualizado")
+    except Exception as e:
+        logger.debug(f"No lactate threshold: {e}")
+
+    try:
+        endurance = client.get_endurance_score(start.isoformat(), today_str)
+        t = db.table("endurance_score")
+        r = {"date": today_str, "data": endurance, "synced_at": datetime.now(timezone.utc).isoformat()}
+        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        logger.info("💪 Endurance score actualizado")
+    except Exception as e:
+        logger.debug(f"No endurance score: {e}")
 
     logger.info(f"✅ Sync completado: {summary}")
     return summary

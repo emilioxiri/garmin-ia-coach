@@ -60,6 +60,30 @@ def get_context_for_ai(days: int = 14) -> dict:
         reverse=True,
     )
 
+    # Daily wellness metrics
+    def _date_sorted(table_name):
+        return sorted(
+            db.table(table_name).search(Q.date >= cutoff),
+            key=lambda x: x.get("date", ""),
+            reverse=True,
+        )
+
+    training_status    = _date_sorted("training_status")
+    training_readiness = _date_sorted("training_readiness")
+    respiration        = _date_sorted("respiration")
+    spo2               = _date_sorted("spo2")
+    stress             = _date_sorted("stress")
+
+    # Fitness snapshot — most recent record of each
+    def _latest(table_name):
+        records = db.table(table_name).all()
+        return max(records, key=lambda x: x.get("date", "")) if records else None
+
+    fitness_metrics  = _latest("fitness_metrics")
+    race_predictions = _latest("race_predictions")
+    lactate_threshold = _latest("lactate_threshold")
+    endurance_score  = _latest("endurance_score")
+
     # Memoria del entrenador (notas guardadas)
     memory = db.table("memory").all()
 
@@ -68,6 +92,15 @@ def get_context_for_ai(days: int = 14) -> dict:
         "sleep": sleep,
         "hrv": hrv,
         "body_battery": body_battery,
+        "training_status": training_status,
+        "training_readiness": training_readiness,
+        "respiration": respiration,
+        "spo2": spo2,
+        "stress": stress,
+        "fitness_metrics": fitness_metrics,
+        "race_predictions": race_predictions,
+        "lactate_threshold": lactate_threshold,
+        "endurance_score": endurance_score,
         "memory": memory,
         "days_covered": days,
     }
@@ -120,7 +153,8 @@ def purge_old_data(days: int = 30) -> dict:
     removed["activities"] = len(old_acts)
     act_table.remove(Q.startTimeLocal.test(lambda v: bool(v) and v[:10] < cutoff))
 
-    for table_name in ("sleep", "hrv", "body_battery"):
+    for table_name in ("sleep", "hrv", "body_battery",
+                        "training_status", "training_readiness", "respiration", "spo2", "stress"):
         table = db.table(table_name)
         old = table.search(Q.date < cutoff)
         removed[table_name] = len(old)

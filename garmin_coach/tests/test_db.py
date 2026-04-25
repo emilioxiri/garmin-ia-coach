@@ -119,18 +119,20 @@ def test_purge_removes_old_sleep():
     assert remaining[0]["date"] == recent_date
 
 
-def test_purge_removes_old_hrv_and_body_battery():
+def test_purge_removes_old_date_keyed_tables():
     import garmin_coach.db as db
     db_inst = make_db()
     cutoff = date.today() - timedelta(days=30)
     old_date = (cutoff - timedelta(days=5)).isoformat()
     recent_date = date.today().isoformat()
-    for table_name in ("hrv", "body_battery"):
+    all_date_tables = ("hrv", "body_battery", "training_status", "training_readiness",
+                       "respiration", "spo2", "stress")
+    for table_name in all_date_tables:
         db_inst.table(table_name).insert({"date": old_date})
         db_inst.table(table_name).insert({"date": recent_date})
     with patch_db(db_inst):
         db.purge_old_data(days=30)
-    for table_name in ("hrv", "body_battery"):
+    for table_name in all_date_tables:
         remaining = db_inst.table(table_name).all()
         assert len(remaining) == 1
         assert remaining[0]["date"] == recent_date
@@ -161,6 +163,8 @@ def test_purge_returns_removed_counts():
     assert removed["sleep"] == 1
     assert removed["hrv"] == 0
     assert removed["body_battery"] == 0
+    for t in ("training_status", "training_readiness", "respiration", "spo2", "stress"):
+        assert removed[t] == 0
 
 
 def test_purge_empty_db_returns_zeros():
@@ -178,7 +182,13 @@ def test_get_context_for_ai_returns_all_keys():
     db_inst = make_db()
     with patch_db(db_inst):
         ctx = db.get_context_for_ai(days=7)
-    assert set(ctx.keys()) == {"activities", "sleep", "hrv", "body_battery", "memory", "days_covered"}
+    expected = {
+        "activities", "sleep", "hrv", "body_battery",
+        "training_status", "training_readiness", "respiration", "spo2", "stress",
+        "fitness_metrics", "race_predictions", "lactate_threshold", "endurance_score",
+        "memory", "days_covered",
+    }
+    assert set(ctx.keys()) == expected
     assert ctx["days_covered"] == 7
 
 
@@ -244,6 +254,36 @@ def test_get_context_for_ai_filters_sleep_hrv_bb():
     for key in ("sleep", "hrv", "body_battery"):
         assert len(ctx[key]) == 1
         assert ctx[key][0]["value"] == "new"
+
+
+def test_get_context_for_ai_filters_wellness_tables():
+    import garmin_coach.db as db
+    db_inst = make_db()
+    cutoff = date.today() - timedelta(days=7)
+    old = (cutoff - timedelta(days=1)).isoformat()
+    recent = date.today().isoformat()
+    for table in ("training_status", "training_readiness", "respiration", "spo2", "stress"):
+        db_inst.table(table).insert({"date": old, "value": "old"})
+        db_inst.table(table).insert({"date": recent, "value": "new"})
+    with patch_db(db_inst):
+        ctx = db.get_context_for_ai(days=7)
+    for key in ("training_status", "training_readiness", "respiration", "spo2", "stress"):
+        assert len(ctx[key]) == 1
+        assert ctx[key][0]["value"] == "new"
+
+
+def test_get_context_for_ai_fitness_snapshot_returns_latest():
+    import garmin_coach.db as db
+    db_inst = make_db()
+    db_inst.table("fitness_metrics").insert({"date": "2024-01-10", "vo2max": 50})
+    db_inst.table("fitness_metrics").insert({"date": "2024-01-20", "vo2max": 52})
+    db_inst.table("race_predictions").insert({"date": "2024-01-20", "predictions": []})
+    with patch_db(db_inst):
+        ctx = db.get_context_for_ai(days=7)
+    assert ctx["fitness_metrics"]["vo2max"] == 52
+    assert ctx["race_predictions"]["predictions"] == []
+    assert ctx["lactate_threshold"] is None
+    assert ctx["endurance_score"] is None
 
 
 # ── save_memory ───────────────────────────────────────────────────────────────
