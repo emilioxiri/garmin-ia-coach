@@ -21,6 +21,7 @@ ruff format .
 cd docker && docker-compose up -d --build
 cd docker && docker-compose logs -f
 cd docker && docker-compose down
+make hard-restart # Turn off the current container, build a new one and turn on.
 
 # Add/remove dependencies
 poetry add <package>

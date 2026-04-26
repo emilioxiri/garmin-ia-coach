@@ -32,6 +32,8 @@ up-build: ## Build and start Docker (detached)
 down: ## Stop Docker
 	$(COMPOSE) down
 
+hard-restart: down up-build ## Stop, build, and start Docker
+
 logs: ## Follow Docker logs
 	$(COMPOSE) logs -f
 
