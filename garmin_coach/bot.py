@@ -120,10 +120,22 @@ async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     loop = asyncio.get_event_loop()
     briefing = await loop.run_in_executor(None, generate_daily_briefing, moment)
     formatted = format_for_telegram(briefing)
-    try:
-        await msg.edit_text(formatted, parse_mode="Markdown")
-    except Exception:
-        await msg.edit_text(briefing)
+    if len(formatted) > 4000:
+        parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
+        try:
+            await msg.edit_text(parts[0], parse_mode="Markdown")
+        except Exception:
+            await msg.edit_text(parts[0])
+        for part in parts[1:]:
+            try:
+                await update.message.reply_text(part, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(part)
+    else:
+        try:
+            await msg.edit_text(formatted, parse_mode="Markdown")
+        except Exception:
+            await msg.edit_text(briefing)
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):

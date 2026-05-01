@@ -34,7 +34,8 @@ Cuando no tengas datos suficientes, dilo claramente y pide más información.
 Si el atleta menciona sensaciones, lesiones o estado de ánimo, tenlo en cuenta y guárdalo como contexto importante.
 
 Formato de respuesta:
-- Respuestas CORTAS: máximo 6-8 líneas. Sin relleno.
+- Respuestas detalladas: entre 15 y 25 líneas. Desarrolla los análisis con profundidad.
+- Estructura bien el mensaje: sección de estado, análisis, recomendaciones concretas.
 - Usa emojis puntuales para visualizar.
 - Para listas usa guión (-).
 - Para negrita usa *asterisco simple* (formato Telegram).
@@ -67,7 +68,7 @@ class CoachSession:
         try:
             response = client.chat.completions.create(
                 model=MODEL,
-                max_tokens=600,
+                max_tokens=1200,
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}] + self.history,
             )
             assistant_message = response.choices[0].message.content
@@ -113,7 +114,7 @@ def generate_daily_briefing(moment: str = "morning") -> str:
     try:
         response = client.chat.completions.create(
             model=MODEL,
-            max_tokens=500,
+            max_tokens=1000,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
