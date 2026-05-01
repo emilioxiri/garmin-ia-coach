@@ -317,12 +317,44 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
         max_m = client.get_max_metrics(today_str)
         vo2max = None
         try:
-            metrics_map = max_m.get("allMetrics", {}).get("metricsMap", {})
-            vo2max_list = metrics_map.get("VO2MAX_VALUE", [])
-            if vo2max_list:
-                vo2max = vo2max_list[-1].get("value")
-        except Exception:
-            pass
+            # API may return list or dict — handle both
+            if isinstance(max_m, list):
+                for item in max_m:
+                    v = item.get("vO2MaxValue") if isinstance(item, dict) else None
+                    if v is not None:
+                        vo2max = v
+                        break
+            else:
+                metrics_map = max_m.get("allMetrics", {}).get("metricsMap", {})
+                vo2max_list = metrics_map.get("VO2MAX_VALUE", [])
+                if vo2max_list:
+                    vo2max = vo2max_list[-1].get("value")
+        except Exception as parse_err:
+            logger.debug(f"VO2max parse failed: {parse_err}. Raw: {max_m}")
+
+        # Fallback 1: training_status.mostRecentVO2Max.generic
+        if vo2max is None:
+            ts_recs = sorted(
+                db.table("training_status").all(),
+                key=lambda r: r.get("date", ""),
+            )
+            for rec in reversed(ts_recs):
+                try:
+                    vo2max = rec["mostRecentVO2Max"]["generic"]["vo2MaxValue"]
+                    if vo2max is not None:
+                        break
+                except (KeyError, TypeError):
+                    continue
+
+        # Fallback 2: latest activity with vO2MaxValue
+        if vo2max is None:
+            acts = sorted(
+                [a for a in db.table("activities").all() if a.get("vO2MaxValue")],
+                key=lambda a: a.get("startTimeLocal", ""),
+            )
+            if acts:
+                vo2max = acts[-1]["vO2MaxValue"]
+
         t = db.table("fitness_metrics")
         r = {"date": today_str, "vo2max": vo2max, "maxMetrics": max_m, "synced_at": datetime.now(timezone.utc).isoformat()}
         t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)

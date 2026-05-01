@@ -204,9 +204,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Setup del bot ──────────────────────────────────────────────────────────────
 
+async def _on_startup(app: Application) -> None:
+    import asyncio
+    set_event_loop(asyncio.get_event_loop())
+
+
 def build_application() -> Application:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    app = Application.builder().token(token).concurrent_updates(True).build()
+    app = Application.builder().token(token).concurrent_updates(True).post_init(_on_startup).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("sync", cmd_sync))
