@@ -107,6 +107,29 @@ All specs implemented. See `docs/implementations/` for technical details.
 - `db.get_context_for_ai` sigue devolviendo registros raw (lo usa `bot.cmd_status` para conteos).
 - Detalle: `docs/implementations/llm_context_slimming.md`. Plan original con 3 opciones (incluida tool calling C como evolución futura): `docs/implementations/llm_context_slimming_plan.md`.
 
+## Implemented: non-distance activity filtering (`garmin_coach/context_builder.py`, `garmin_coach/coach.py`)
+
+- `_NON_DISTANCE_TYPES` (padel, tennis, strength_training, yoga, climbing, HIIT…) → `slim_activity` descarta distancia/velocidad/ritmo/cadencia/potencia/elevación/sweat-loss para esas actividades.
+- `duration_hms` (HH:MM:SS o MM:SS) reemplaza `duration`/`movingDuration`/`elapsedDuration` en segundos en TODAS las actividades. El LLM ya no puede citar "5212.53 segundos".
+- `SYSTEM_PROMPT` con regla explícita: usar `duration_hms`, no segundos; en padel/fuerza/yoga no mencionar distancia ni ritmo.
+- Detalle: `docs/implementations/non_distance_activity_filtering.md`.
+
+## Implemented: Telegram HTML formatting (`garmin_coach/bot.py`)
+
+- `format_for_telegram` ahora produce HTML (`**x**` → `<b>x</b>`, escapa `<>&`, strip de cabeceras `#`).
+- Todas las salidas LLM (`cmd_briefing`, `handle_message`, `send_scheduled_message`) usan `parse_mode="HTML"` con fallback sin parse.
+- `send_scheduled_message` aplica el formateo + chunking; antes mandaba el texto crudo del LLM y los `**` aparecían en el chat.
+- Detalle: `docs/implementations/telegram_html_formatting.md`.
+
+## Implemented: coach quality Fase 1 (`garmin_coach/context_builder.py`, `garmin_coach/coach.py`)
+
+- `slim_activity` añade `date`, `weekday` (es), `distance_km`, `pace_min_per_km`, `is_run`, `is_long_run` (≥15 km).
+- TE renombrado: `aerobicTrainingEffect` → `aerobic_te`, `anaerobicTrainingEffect` → `anaerobic_te` (evita que el modelo los confunda con VO2max).
+- `slim_fitness_metrics` expone alias `vo2max_running`.
+- `build_context` añade `notable_runs` (top-3 carreras más largas de la ventana, calculado sobre TODAS las actividades, no sólo el cap). Default `max_activities` 10 → 15.
+- `SYSTEM_PROMPT` con reglas estrictas: VO2max sólo en `fitness_metrics.vo2max_running`; preguntas referidas a una carrera concreta → buscar primero en `notable_runs` casando por `weekday`/`date`/`distance_km`; si no hay match, decirlo explícitamente, no inventar.
+- Detalle: `docs/implementations/coach_quality_phase1.md`.
+
 ## Implemented: smart sync window + purge (`garmin_coach/db.py`, `garmin_coach/garmin_sync.py`)
 
 - `purge_old_data(days)` — removes records older than N days from all tables at start of sync

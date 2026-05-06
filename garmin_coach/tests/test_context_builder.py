@@ -130,6 +130,114 @@ def test_slim_activity_rounds_floats():
     assert slim_activity(raw)["averageSpeed"] == 3.33
 
 
+# ── slim_activity: duración en HH:MM:SS, sin segundos crudos ──────────────────
+
+
+def test_slim_activity_replaces_duration_seconds_with_hms():
+    """duration en segundos debe sustituirse por duration_hms (HH:MM:SS)."""
+    raw = {"activityId": "1", "duration": 5212.53}
+    slim = slim_activity(raw)
+    assert "duration" not in slim, "los segundos crudos no deben llegar al LLM"
+    assert slim["duration_hms"] == "1:26:53"
+
+
+def test_slim_activity_short_duration_uses_mm_ss():
+    raw = {"activityId": "1", "duration": 754}
+    slim = slim_activity(raw)
+    assert slim["duration_hms"] == "12:34"
+
+
+def test_slim_activity_converts_all_duration_variants():
+    raw = {
+        "activityId": "1",
+        "duration": 3600,
+        "movingDuration": 3500,
+        "elapsedDuration": 3700,
+    }
+    slim = slim_activity(raw)
+    assert slim["duration_hms"] == "1:00:00"
+    assert slim["movingDuration_hms"] == "58:20"
+    assert slim["elapsedDuration_hms"] == "1:01:40"
+    for f in ("duration", "movingDuration", "elapsedDuration"):
+        assert f not in slim
+
+
+# ── slim_activity: padel / fuerza / yoga sin distancia ni ritmo ───────────────
+
+
+def test_slim_activity_padel_drops_distance_and_pace():
+    raw = {
+        "activityId": "1",
+        "activityType": {"typeKey": "padel"},
+        "duration": 5212.53,
+        "distance": 190.0,
+        "averageSpeed": 0.04,
+        "averageHR": 111,
+        "maxHR": 151,
+        "calories": 600,
+        "moderateIntensityMinutes": 40,
+        "vigorousIntensityMinutes": 5,
+        "activityTrainingLoad": 80,
+    }
+    slim = slim_activity(raw)
+    assert slim["type"] == "padel"
+    assert slim["duration_hms"] == "1:26:53"
+    assert slim["averageHR"] == 111
+    assert slim["maxHR"] == 151
+    assert slim["moderateIntensityMinutes"] == 40
+    assert slim["activityTrainingLoad"] == 80
+    # Distancia / velocidad / ritmo no aplican a padel
+    for forbidden in (
+        "distance",
+        "distance_km",
+        "averageSpeed",
+        "maxSpeed",
+        "pace_min_per_km",
+    ):
+        assert forbidden not in slim, f"{forbidden} no debe aparecer en padel"
+
+
+def test_slim_activity_strength_drops_running_dynamics_and_power():
+    raw = {
+        "activityId": "1",
+        "activityType": {"typeKey": "strength_training"},
+        "duration": 1800,
+        "distance": 0,
+        "averageHR": 120,
+        "avgStrideLength": 0.5,
+        "avgPower": 200,
+        "elevationGain": 5,
+        "estimatedSweatLoss": 100,
+    }
+    slim = slim_activity(raw)
+    for forbidden in (
+        "distance",
+        "distance_km",
+        "avgStrideLength",
+        "avgPower",
+        "elevationGain",
+        "estimatedSweatLoss",
+    ):
+        assert forbidden not in slim
+    assert slim["averageHR"] == 120
+    assert slim["duration_hms"] == "30:00"
+
+
+def test_slim_activity_running_keeps_distance_and_pace():
+    """Running NO está en _NON_DISTANCE_TYPES → distancia y ritmo se conservan."""
+    raw = {
+        "activityId": "1",
+        "activityType": {"typeKey": "running"},
+        "distance": 10000,
+        "averageSpeed": 3.33,
+        "duration": 3000,
+    }
+    slim = slim_activity(raw)
+    assert slim["distance_km"] == 10.0
+    assert slim["pace_min_per_km"] == 5.01
+    assert slim["is_run"] is True
+
+
 # ── slim_sleep ────────────────────────────────────────────────────────────────
 
 
@@ -261,7 +369,13 @@ def test_aggregate_series_rounds_floats():
 def test_slim_fitness_metrics_drops_max_metrics():
     raw = {"date": "2026-04-25", "vo2max": 55, "maxMetrics": {"huge": "x" * 10000}}
     slim = slim_fitness_metrics(raw)
-    assert slim == {"date": "2026-04-25", "vo2max": 55}
+    assert slim == {"date": "2026-04-25", "vo2max": 55, "vo2max_running": 55}
+
+
+def test_slim_fitness_metrics_aliases_vo2max_running():
+    raw = {"date": "2026-04-25", "vo2max": 60.5}
+    slim = slim_fitness_metrics(raw)
+    assert slim["vo2max_running"] == 60.5
 
 
 def test_slim_fitness_metrics_none_input():
@@ -424,6 +538,7 @@ def test_build_context_includes_all_keys():
     expected = {
         "days_covered",
         "activities",
+        "notable_runs",
         "sleep",
         "hrv",
         "body_battery",
@@ -463,9 +578,167 @@ def test_build_context_payload_smaller_than_raw():
 def test_build_context_handles_empty_input():
     ctx = build_context({"days_covered": 7})
     assert ctx["activities"] == []
+    assert ctx["notable_runs"] == []
     assert ctx["sleep"]["recent"] == []
     assert ctx["sleep"]["score_summary"] is None
     assert ctx["fitness_metrics"] is None
+
+
+# ── slim_activity derived fields (Fase 1) ────────────────────────────────────
+
+
+def test_slim_activity_extracts_date_and_weekday_es():
+    # 2026-05-01 = viernes
+    raw = {
+        "activityId": "1",
+        "startTimeLocal": "2026-05-01 08:30:00",
+        "activityType": {"typeKey": "running"},
+    }
+    slim = slim_activity(raw)
+    assert slim["date"] == "2026-05-01"
+    assert slim["weekday"] == "viernes"
+
+
+def test_slim_activity_handles_invalid_start_time():
+    raw = {"activityId": "1", "startTimeLocal": "no-es-fecha"}
+    slim = slim_activity(raw)
+    assert "date" not in slim
+    assert "weekday" not in slim
+
+
+def test_slim_activity_computes_distance_km():
+    raw = {"activityId": "1", "distance": 21097.5}
+    assert slim_activity(raw)["distance_km"] == 21.1
+
+
+def test_slim_activity_computes_pace_min_per_km():
+    # 3.0 m/s → 1000m / 3 m/s = 333.33s = 5.55 min/km
+    raw = {"activityId": "1", "averageSpeed": 3.0}
+    slim = slim_activity(raw)
+    assert slim["pace_min_per_km"] == 5.56
+
+
+def test_slim_activity_pace_skipped_when_speed_zero():
+    raw = {"activityId": "1", "averageSpeed": 0}
+    assert "pace_min_per_km" not in slim_activity(raw)
+
+
+def test_slim_activity_marks_run():
+    raw = {
+        "activityId": "1",
+        "activityType": {"typeKey": "trail_running"},
+        "distance": 8000,
+    }
+    slim = slim_activity(raw)
+    assert slim["is_run"] is True
+    assert "is_long_run" not in slim
+
+
+def test_slim_activity_marks_long_run_at_threshold():
+    raw = {
+        "activityId": "1",
+        "activityType": {"typeKey": "running"},
+        "distance": 21097,
+    }
+    slim = slim_activity(raw)
+    assert slim["is_run"] is True
+    assert slim["is_long_run"] is True
+
+
+def test_slim_activity_non_run_has_no_run_flags():
+    raw = {
+        "activityId": "1",
+        "activityType": {"typeKey": "strength_training"},
+        "distance": 0,
+    }
+    slim = slim_activity(raw)
+    assert "is_run" not in slim
+    assert "is_long_run" not in slim
+
+
+def test_slim_activity_renames_training_effect_fields():
+    raw = {
+        "activityId": "1",
+        "aerobicTrainingEffect": 4.2,
+        "anaerobicTrainingEffect": 1.8,
+    }
+    slim = slim_activity(raw)
+    assert slim["aerobic_te"] == 4.2
+    assert slim["anaerobic_te"] == 1.8
+    assert "aerobicTrainingEffect" not in slim
+    assert "anaerobicTrainingEffect" not in slim
+
+
+# ── build_context notable_runs / cap (Fase 1) ────────────────────────────────
+
+
+def _runs_sample(distances):
+    return {
+        "days_covered": 30,
+        "activities": [
+            {
+                "activityId": str(i),
+                "startTimeLocal": f"2026-04-{20 - i:02d} 08:00:00",
+                "activityType": {"typeKey": "running"},
+                "distance": d,
+            }
+            for i, d in enumerate(distances)
+        ],
+    }
+
+
+def test_build_context_notable_runs_picks_longest_three():
+    raw = _runs_sample([5000, 21097, 10000, 15000, 8000])
+    ctx = build_context(raw)
+    distances = [a["distance_km"] for a in ctx["notable_runs"]]
+    assert distances == [21.1, 15.0, 10.0]
+
+
+def test_build_context_notable_runs_ignores_non_runs():
+    raw = {
+        "days_covered": 7,
+        "activities": [
+            {
+                "activityId": "1",
+                "startTimeLocal": "2026-04-25 08:00:00",
+                "activityType": {"typeKey": "strength_training"},
+                "distance": 9999,
+            },
+            {
+                "activityId": "2",
+                "startTimeLocal": "2026-04-24 08:00:00",
+                "activityType": {"typeKey": "running"},
+                "distance": 5000,
+            },
+        ],
+    }
+    ctx = build_context(raw)
+    assert len(ctx["notable_runs"]) == 1
+    assert ctx["notable_runs"][0]["activityId"] == "2"
+
+
+def test_build_context_default_max_activities_is_15():
+    raw = {
+        "days_covered": 30,
+        "activities": [
+            {
+                "activityId": str(i),
+                "startTimeLocal": f"2026-04-{30 - i:02d} 08:00:00",
+            }
+            for i in range(20)
+        ],
+    }
+    ctx = build_context(raw)
+    assert len(ctx["activities"]) == 15
+
+
+def test_build_context_notable_runs_can_include_activities_outside_cap():
+    """notable_runs busca entre TODAS las actividades, no sólo el cap."""
+    distances = [3000] * 14 + [21097]  # carrera larga en posición 15 (fuera del top-15)
+    raw = _runs_sample(distances)
+    ctx = build_context(raw, max_activities=10)
+    assert len(ctx["activities"]) == 10
+    assert any(a.get("distance_km") == 21.1 for a in ctx["notable_runs"])
 
 
 # ── integration: db.get_compact_context_for_ai ────────────────────────────────

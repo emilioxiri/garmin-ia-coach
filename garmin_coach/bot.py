@@ -3,6 +3,7 @@ bot.py
 Bot de Telegram con conversación libre, comandos y memoria.
 """
 
+import html
 import logging
 import os
 import re
@@ -17,19 +18,24 @@ from telegram.ext import (
 from garmin_coach.coach import CoachSession, generate_daily_briefing
 from garmin_coach.garmin_sync import sync_all, provide_mfa_code, set_event_loop
 from garmin_coach.db import get_last_sync, log_sync, save_memory, get_context_for_ai
-import json
 
 logger = logging.getLogger(__name__)
 
+_HEADER_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
 
 def format_for_telegram(text: str) -> str:
-    """Convert LLM markdown output to Telegram legacy Markdown.
+    """Convert LLM markdown output to Telegram HTML.
 
-    LLMs emit **bold** and ## headers which Telegram does not render.
-    Converts to Telegram-compatible *bold* and strips heading symbols.
+    Telegram legacy Markdown breaks on unmatched `_`/`(`/`[` — common in
+    LLM output (dates, numbers, parentheticals). HTML parse_mode ignores
+    stray `*`/`_`, so it is far more robust. Converts `**bold**` to
+    `<b>bold</b>` and strips `#` headers; HTML-escapes the rest.
     """
-    text = text.replace("**", "*")
-    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = _HEADER_RE.sub("", text)
+    text = html.escape(text, quote=False)
+    text = _BOLD_RE.sub(r"<b>\1</b>", text)
     return text
 
 
@@ -51,6 +57,7 @@ def is_authorized(update: Update) -> bool:
 
 # ── Comandos ───────────────────────────────────────────────────────────────────
 
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
@@ -71,7 +78,10 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     import asyncio
-    msg = await update.message.reply_text("🔄 Sincronizando datos de Garmin... puede tardar un momento.")
+
+    msg = await update.message.reply_text(
+        "🔄 Sincronizando datos de Garmin... puede tardar un momento."
+    )
     try:
         email = os.getenv("GARMIN_EMAIL")
         password = os.getenv("GARMIN_PASSWORD")
@@ -114,6 +124,7 @@ async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     import asyncio
     from datetime import datetime
+
     hour = datetime.now().hour
     moment = "morning" if hour < 14 else "evening"
     msg = await update.message.reply_text("🤔 Generando tu briefing personalizado...")
@@ -121,19 +132,19 @@ async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     briefing = await loop.run_in_executor(None, generate_daily_briefing, moment)
     formatted = format_for_telegram(briefing)
     if len(formatted) > 4000:
-        parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
+        parts = [formatted[i : i + 4000] for i in range(0, len(formatted), 4000)]
         try:
-            await msg.edit_text(parts[0], parse_mode="Markdown")
+            await msg.edit_text(parts[0], parse_mode="HTML")
         except Exception:
             await msg.edit_text(parts[0])
         for part in parts[1:]:
             try:
-                await update.message.reply_text(part, parse_mode="Markdown")
+                await update.message.reply_text(part, parse_mode="HTML")
             except Exception:
                 await update.message.reply_text(part)
     else:
         try:
-            await msg.edit_text(formatted, parse_mode="Markdown")
+            await msg.edit_text(formatted, parse_mode="HTML")
         except Exception:
             await msg.edit_text(briefing)
 
@@ -151,9 +162,12 @@ async def cmd_resetsession(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     from garmin_coach.garmin_sync import SESSION_PATH
+
     if SESSION_PATH.exists():
         SESSION_PATH.unlink()
-        await update.message.reply_text("🗑 Sesión de Garmin eliminada. El próximo /sync hará login completo.")
+        await update.message.reply_text(
+            "🗑 Sesión de Garmin eliminada. El próximo /sync hará login completo."
+        )
     else:
         await update.message.reply_text("ℹ️ No había sesión guardada.")
 
@@ -166,7 +180,9 @@ async def cmd_mfa(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Uso: /mfa <código>")
         return
     provide_mfa_code(code)
-    await update.message.reply_text("✅ Código MFA enviado, continuando login de Garmin...")
+    await update.message.reply_text(
+        "✅ Código MFA enviado, continuando login de Garmin..."
+    )
 
 
 async def cmd_memoria(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -179,10 +195,13 @@ async def cmd_memoria(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     save_memory(note)
-    await update.message.reply_text(f"🧠 Guardado en memoria: _{note}_", parse_mode="Markdown")
+    await update.message.reply_text(
+        f"🧠 Guardado en memoria: _{note}_", parse_mode="Markdown"
+    )
 
 
 # ── Mensajes de texto libre ────────────────────────────────────────────────────
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
@@ -201,29 +220,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Telegram tiene límite de 4096 chars por mensaje
     if len(formatted) > 4000:
-        parts = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
+        parts = [formatted[i : i + 4000] for i in range(0, len(formatted), 4000)]
         for part in parts:
             try:
-                await update.message.reply_text(part, parse_mode="Markdown")
+                await update.message.reply_text(part, parse_mode="HTML")
             except Exception:
                 await update.message.reply_text(part)
     else:
         try:
-            await update.message.reply_text(formatted, parse_mode="Markdown")
+            await update.message.reply_text(formatted, parse_mode="HTML")
         except Exception:
             await update.message.reply_text(response)
 
 
 # ── Setup del bot ──────────────────────────────────────────────────────────────
 
+
 async def _on_startup(app: Application) -> None:
     import asyncio
+
     set_event_loop(asyncio.get_event_loop())
 
 
 def build_application() -> Application:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    app = Application.builder().token(token).concurrent_updates(True).post_init(_on_startup).build()
+    app = (
+        Application.builder()
+        .token(token)
+        .concurrent_updates(True)
+        .post_init(_on_startup)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("sync", cmd_sync))
@@ -239,8 +266,25 @@ def build_application() -> Application:
 
 
 async def send_scheduled_message(app: Application, text: str):
-    """Envía un mensaje programado al usuario autorizado."""
-    try:
-        await app.bot.send_message(chat_id=ALLOWED_USER_ID, text=text)
-    except Exception as e:
-        logger.error(f"Error enviando mensaje programado: {e}")
+    """Envía un mensaje programado al usuario autorizado.
+
+    Aplica el mismo conversor markdown→HTML que el resto de salidas del LLM
+    para que los briefings programados rendericen `**bold**` correctamente.
+    """
+    formatted = format_for_telegram(text)
+    chunks = (
+        [formatted[i : i + 4000] for i in range(0, len(formatted), 4000)]
+        if len(formatted) > 4000
+        else [formatted]
+    )
+    for chunk in chunks:
+        try:
+            await app.bot.send_message(
+                chat_id=ALLOWED_USER_ID, text=chunk, parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Fallback sin parse_mode en briefing programado: {e}")
+            try:
+                await app.bot.send_message(chat_id=ALLOWED_USER_ID, text=chunk)
+            except Exception as e2:
+                logger.error(f"Error enviando mensaje programado: {e2}")

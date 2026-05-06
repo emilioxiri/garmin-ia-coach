@@ -10,8 +10,88 @@ Cada `slim_*` proyecta sólo los campos relevantes de un registro.
 
 from __future__ import annotations
 
+from datetime import datetime
 from statistics import mean
 from typing import Any, Iterable
+
+_WEEKDAYS_ES = (
+    "lunes",
+    "martes",
+    "miércoles",
+    "jueves",
+    "viernes",
+    "sábado",
+    "domingo",
+)
+
+_RUN_TYPES = {
+    "running",
+    "trail_running",
+    "treadmill_running",
+    "virtual_run",
+    "track_running",
+    "indoor_running",
+    "street_running",
+}
+
+# Tipos de actividad sin distancia/ritmo significativos (deportes de raqueta,
+# fuerza, gimnasio, escalada, yoga, etc). Para estos, slim_activity descarta
+# distancia, velocidad, ritmo, dinámica de carrera, potencia y elevación —
+# son datos de Garmin sin sentido para padel, pesas, etc.
+_NON_DISTANCE_TYPES = {
+    "padel",
+    "tennis",
+    "pickleball",
+    "squash",
+    "racquet_ball",
+    "racquetball",
+    "table_tennis",
+    "badminton",
+    "boxing",
+    "mixed_martial_arts",
+    "strength_training",
+    "indoor_strength_training",
+    "yoga",
+    "pilates",
+    "indoor_climbing",
+    "bouldering",
+    "rock_climbing",
+    "hiit",
+    "cardio",
+    "stretching",
+    "breathwork",
+    "meditation",
+    "mobility",
+    "gym",
+    "floor_climbing",
+    "stair_climbing",
+}
+
+_NON_DISTANCE_DROP_FIELDS = (
+    "distance",
+    "averageSpeed",
+    "maxSpeed",
+    "avgStrideLength",
+    "avgVerticalRatio",
+    "avgVerticalOscillation",
+    "avgGroundContactTime",
+    "averageRunningCadenceInStepsPerMinute",
+    "maxRunningCadenceInStepsPerMinute",
+    "avgPower",
+    "maxPower",
+    "elevationGain",
+    "elevationLoss",
+    "minElevation",
+    "maxElevation",
+    "estimatedSweatLoss",
+)
+
+_FIELD_RENAMES = {
+    "aerobicTrainingEffect": "aerobic_te",
+    "anaerobicTrainingEffect": "anaerobic_te",
+}
+
+LONG_RUN_THRESHOLD_M = 15000
 
 # Campos de carrera alineados con Garmin Connect "Carrera > Estadísticas".
 _ACTIVITY_FIELDS = (
@@ -77,20 +157,94 @@ def _coerce_number(value: Any) -> Any:
     return value
 
 
+def _format_duration(seconds: Any) -> str | None:
+    """Formatea segundos a `HH:MM:SS` o `MM:SS`. None si no es numérico válido."""
+    if not isinstance(seconds, (int, float)) or seconds < 0:
+        return None
+    total = int(round(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h:d}:{m:02d}:{s:02d}"
+    return f"{m:d}:{s:02d}"
+
+
+def _parse_local_datetime(value: Any) -> datetime | None:
+    """Parsea startTimeLocal de Garmin (`YYYY-MM-DD HH:MM:SS`) sin fallar."""
+    if not isinstance(value, str) or not value:
+        return None
+    candidate = value.replace(" ", "T")[:19]
+    try:
+        return datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+
+
 def slim_activity(act: dict) -> dict:
-    """Proyecta una actividad a sus campos relevantes para el coach."""
+    """Proyecta una actividad a sus campos relevantes para el coach.
+
+    Añade campos derivados que el LLM consume mejor que el JSON crudo:
+      - `date` y `weekday` (en español) extraídos de `startTimeLocal`
+      - `duration_hms` / `movingDuration_hms` / `elapsedDuration_hms` (HH:MM:SS o MM:SS)
+        en lugar de duración en segundos crudos para que el modelo nunca cite "5212 s"
+      - `distance_km` y `pace_min_per_km` SÓLO para actividades con distancia real
+      - `is_run` / `is_long_run` (≥ 15 km) para filtrar actividades clave
+    Para actividades sin distancia significativa (padel, fuerza, yoga, escalada,
+    HIIT…) descarta distancia, velocidad, ritmo, dinámica de carrera, potencia,
+    elevación y sweat loss — son cero o ruido en Garmin para esos deportes.
+    Renombra `aerobicTrainingEffect` → `aerobic_te` y `anaerobicTrainingEffect`
+    → `anaerobic_te` para evitar que el modelo los confunda con VO2max.
+    """
     out: dict = {}
     for field in _ACTIVITY_FIELDS:
         if field in act and act[field] is not None:
-            out[field] = _coerce_number(act[field])
+            key = _FIELD_RENAMES.get(field, field)
+            out[key] = _coerce_number(act[field])
 
     activity_type = act.get("activityType")
+    type_key: str | None = None
     if isinstance(activity_type, dict):
         type_key = activity_type.get("typeKey")
-        if type_key:
-            out["type"] = type_key
     elif isinstance(activity_type, str):
-        out["type"] = activity_type
+        type_key = activity_type
+    if type_key:
+        out["type"] = type_key
+
+    dt = _parse_local_datetime(act.get("startTimeLocal"))
+    if dt is not None:
+        out["date"] = dt.date().isoformat()
+        out["weekday"] = _WEEKDAYS_ES[dt.weekday()]
+
+    # Duración: convertir SIEMPRE a HH:MM:SS y eliminar segundos crudos para que
+    # el LLM no escriba cosas como "5212.53 segundos".
+    for raw_field, hms_field in (
+        ("duration", "duration_hms"),
+        ("movingDuration", "movingDuration_hms"),
+        ("elapsedDuration", "elapsedDuration_hms"),
+    ):
+        if raw_field in out:
+            hms = _format_duration(out[raw_field])
+            if hms is not None:
+                out[hms_field] = hms
+            del out[raw_field]
+
+    distance = out.get("distance")
+    is_non_distance = type_key in _NON_DISTANCE_TYPES
+
+    if is_non_distance:
+        for f in _NON_DISTANCE_DROP_FIELDS:
+            out.pop(f, None)
+    else:
+        if isinstance(distance, (int, float)):
+            out["distance_km"] = round(distance / 1000, 2)
+        speed = out.get("averageSpeed")
+        if isinstance(speed, (int, float)) and speed > 0:
+            out["pace_min_per_km"] = round((1000 / speed) / 60, 2)
+
+    if type_key in _RUN_TYPES:
+        out["is_run"] = True
+        if isinstance(distance, (int, float)) and distance >= LONG_RUN_THRESHOLD_M:
+            out["is_long_run"] = True
 
     return out
 
@@ -185,10 +339,19 @@ def aggregate_series(records: Iterable[dict], field: str) -> dict | None:
 
 
 def slim_fitness_metrics(record: dict | None) -> dict | None:
-    """fitness_metrics trae el `maxMetrics` raw enorme. Sólo conservamos vo2max y fecha."""
+    """fitness_metrics trae el `maxMetrics` raw enorme. Sólo conservamos vo2max y fecha.
+
+    Expone también `vo2max_running` (alias del mismo valor) para que el modelo NO
+    confunda el VO2max con `aerobic_te` (Training Effect, escala 0-5).
+    """
     if not record:
         return None
-    return {"date": record.get("date"), "vo2max": record.get("vo2max")}
+    vo2 = record.get("vo2max")
+    return {
+        "date": record.get("date"),
+        "vo2max": vo2,
+        "vo2max_running": vo2,
+    }
 
 
 def slim_race_predictions(record: dict | None) -> dict | None:
@@ -235,18 +398,33 @@ def slim_endurance_score(record: dict | None) -> dict | None:
     return {"date": record.get("date"), "score": score}
 
 
-def build_context(raw: dict, *, max_activities: int = 10) -> dict:
+NOTABLE_RUNS_LIMIT = 3
+
+
+def build_context(raw: dict, *, max_activities: int = 15) -> dict:
     """Construye el contexto compacto a partir del dict que devuelve `db.get_context_for_ai`.
 
     `raw` debe contener las listas tal como las devuelve TinyDB (ya ordenadas descendente).
     Devuelve un dict con:
-      - actividades recientes proyectadas
+      - `activities`: actividades recientes proyectadas (cap `max_activities`)
+      - `notable_runs`: top-N (default 3) carreras más largas de la ventana, para que
+        el coach localice rápido carreras de fondo aunque caigan fuera del cap
       - últimas N entradas de cada wellness diaria
       - agregados (mean/min/max/last) de los campos numéricos clave
       - snapshot de fitness/race/lactate/endurance proyectados
       - memoria del coach (sin tocar) y `days_covered`
     """
-    activities = [slim_activity(a) for a in raw.get("activities", [])][:max_activities]
+    slim_acts = [slim_activity(a) for a in raw.get("activities", [])]
+    activities = slim_acts[:max_activities]
+    notable_runs = sorted(
+        (
+            a
+            for a in slim_acts
+            if a.get("is_run") and isinstance(a.get("distance_km"), (int, float))
+        ),
+        key=lambda a: a["distance_km"],
+        reverse=True,
+    )[:NOTABLE_RUNS_LIMIT]
 
     sleep_records = [slim_sleep(s) for s in raw.get("sleep", [])]
     hrv_records = [slim_hrv(h) for h in raw.get("hrv", [])]
@@ -260,6 +438,7 @@ def build_context(raw: dict, *, max_activities: int = 10) -> dict:
     return {
         "days_covered": raw.get("days_covered"),
         "activities": activities,
+        "notable_runs": notable_runs,
         "sleep": {
             "recent": sleep_records[:7],
             "score_summary": aggregate_series(sleep_records, "score"),
