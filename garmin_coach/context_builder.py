@@ -239,7 +239,13 @@ def slim_activity(act: dict) -> dict:
             out["distance_km"] = round(distance / 1000, 2)
         speed = out.get("averageSpeed")
         if isinstance(speed, (int, float)) and speed > 0:
-            out["pace_min_per_km"] = round((1000 / speed) / 60, 2)
+            total_sec = 1000 / speed
+            minutes = int(total_sec // 60)
+            seconds = int(round(total_sec - minutes * 60))
+            if seconds == 60:
+                minutes += 1
+                seconds = 0
+            out["pace_min_per_km"] = f"{minutes}:{seconds:02d}"
 
     if type_key in _RUN_TYPES:
         out["is_run"] = True

@@ -39,7 +39,7 @@ REGLAS ESTRICTAS sobre los datos del JSON [DATOS GARMIN]:
 - Cuando el atleta pregunte por una carrera concreta (referencias como "viernes", "ayer", "mi media maratón", "el 10K", "la tirada larga", una marca personal o un PB), busca primero en `notable_runs` y luego en `activities` la actividad cuyo `weekday`/`date`/`distance_km` coincida. Verifica la duración y `distance_km` antes de comentarla.
 - Si no encuentras una actividad que coincida con la referencia del atleta, dilo explícitamente ("no veo esa carrera en los datos recientes"). NO inventes datos ni mezcles métricas de otra actividad.
 - Duración: usa SIEMPRE el campo `duration_hms` (formato HH:MM:SS o MM:SS). NUNCA cites duración en segundos ni en decimales tipo "5212.53 segundos".
-- Para ritmo de carrera usa `pace_min_per_km` (min/km), nunca m/s.
+- Para ritmo de carrera usa `pace_min_per_km` tal cual aparece (string formato "M:SS" min/km, p.ej. "5:47"). NUNCA reformatees ni inventes ritmos: si el campo no existe, no lo cites. Nunca uses m/s ni decimales tipo "5.79".
 - Actividades sin distancia (padel, tenis, pádel, fuerza, yoga, escalada, HIIT, gimnasio, etc., identificables por `type`): NO menciones distancia, ritmo, velocidad, cadencia, potencia ni dinámica de carrera. Esas métricas no aplican y los datos crudos están filtrados. Limítate a duración (`duration_hms`), frecuencia cardíaca (`averageHR`/`maxHR`) y carga/intensidad (`activityTrainingLoad`, `aerobic_te`, `trainingEffectLabel`, minutos moderados/vigorosos).
 
 Formato de respuesta:
@@ -47,8 +47,7 @@ Formato de respuesta:
 - Estructura bien el mensaje: sección de estado, análisis, recomendaciones concretas.
 - Usa emojis puntuales para visualizar.
 - Para listas usa guión (-).
-- Para negrita usa *asterisco simple* (formato Telegram).
-- NUNCA uses dobles asteriscos (**), almohadillas (#) ni encabezados markdown."""
+- Para negrita usa **doble asterisco** (se convierte a HTML <b>). NUNCA uses asterisco simple `*texto*` ni almohadillas (#) ni encabezados markdown."""
 
 
 class CoachSession:

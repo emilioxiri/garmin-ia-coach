@@ -234,7 +234,7 @@ def test_slim_activity_running_keeps_distance_and_pace():
     }
     slim = slim_activity(raw)
     assert slim["distance_km"] == 10.0
-    assert slim["pace_min_per_km"] == 5.01
+    assert slim["pace_min_per_km"] == "5:00"
     assert slim["is_run"] is True
 
 
@@ -612,10 +612,24 @@ def test_slim_activity_computes_distance_km():
 
 
 def test_slim_activity_computes_pace_min_per_km():
-    # 3.0 m/s → 1000m / 3 m/s = 333.33s = 5.55 min/km
+    # 3.0 m/s → 1000m / 3 m/s = 333.33s = 5:33 min/km
     raw = {"activityId": "1", "averageSpeed": 3.0}
     slim = slim_activity(raw)
-    assert slim["pace_min_per_km"] == 5.56
+    assert slim["pace_min_per_km"] == "5:33"
+
+
+def test_slim_activity_pace_rolls_seconds_to_next_minute():
+    # speed → 359.6 sec/km → seconds=60 → carry to 6:00
+    raw = {"activityId": "1", "averageSpeed": 1000 / 359.6}
+    slim = slim_activity(raw)
+    assert slim["pace_min_per_km"] == "6:00"
+
+
+def test_slim_activity_pace_pads_seconds_to_two_digits():
+    # 1000/4 = 250s → 4:10
+    raw = {"activityId": "1", "averageSpeed": 4.0}
+    slim = slim_activity(raw)
+    assert slim["pace_min_per_km"] == "4:10"
 
 
 def test_slim_activity_pace_skipped_when_speed_zero():
