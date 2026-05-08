@@ -31,6 +31,10 @@ case "$path" in
         printf '{"decision":"block","reason":"Garmin session token file is protected. Do not edit."}\n'
         exit 0
         ;;
+    *"data/garmin_coach.json"|*"/data/garmin_coach.json")
+        printf '{"decision":"block","reason":"Runtime TinyDB file is protected. Use db.py helpers (purge_old_data, save_memory, etc.), not direct edits."}\n'
+        exit 0
+        ;;
 esac
 
 exit 0
