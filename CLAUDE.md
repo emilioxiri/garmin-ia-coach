@@ -59,6 +59,7 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 | `garmin_coach/garmin_sync.py` | Garmin auth with session persistence at `/data/garmin_session.json`; MFA flow via Telegram (`/mfa` command + threading.Event); `sync_all` fetches activities, sleep, HRV, body battery |
 | `garmin_coach/db.py` | TinyDB singleton; tables: `activities`, `sleep`, `hrv`, `body_battery`, `memory`, `sync_log`; `get_context_for_ai` returns raw lists; `get_compact_context_for_ai` wraps it with `context_builder` for LLM use |
 | `garmin_coach/context_builder.py` | `slim_*` projections + `aggregate_series` + `build_context` to compact TinyDB records before sending to Groq (avoids `context_length_exceeded`) |
+| `garmin_coach/coach_tools.py` | Function-calling tools (find_activity, get_recent_activities, get_*_window, get_fitness_snapshot, search_memory) + `dispatch_tool_call`. Used by `CoachSession.chat` tool loop. |
 
 ### TinyDB schema notes
 
@@ -129,6 +130,32 @@ All specs implemented. See `docs/implementations/` for technical details.
 - `build_context` añade `notable_runs` (top-3 carreras más largas de la ventana, calculado sobre TODAS las actividades, no sólo el cap). Default `max_activities` 10 → 15.
 - `SYSTEM_PROMPT` con reglas estrictas: VO2max sólo en `fitness_metrics.vo2max_running`; preguntas referidas a una carrera concreta → buscar primero en `notable_runs` casando por `weekday`/`date`/`distance_km`; si no hay match, decirlo explícitamente, no inventar.
 - Detalle: `docs/implementations/coach_quality_phase1.md`.
+
+### Hotfixes Fase 1
+- `pace_min_per_km` ahora string `"M:SS"` ya formateado (antes decimal causaba "5:79"). Carry de 60s incluido.
+- Prompt de formato ahora pide `**doble asterisco**` para negrita (alineado con `format_for_telegram`, antes pedía `*simple*` que pasaba literal).
+- Detalle: `docs/implementations/coach_quality_phase1_hotfixes.md`.
+
+## Implemented: coach quality Fase 2 — tool calling (`garmin_coach/coach_tools.py`, `garmin_coach/coach.py`)
+
+- Nuevo `coach_tools.py` con 9 tools (`find_activity`, `get_recent_activities`, `get_activity_detail`, `get_sleep_window`, `get_hrv_window`, `get_body_battery_window`, `get_training_readiness_window`, `get_fitness_snapshot`, `search_memory`) + `TOOLS_SPEC` (schema OpenAI/Groq) + `dispatch_tool_call(name, args)` con manejo de errores.
+- `CoachSession.chat` ejecuta loop de function calling (max 5 iteraciones): manda `tools=TOOLS_SPEC`, ejecuta `tool_calls` vía dispatcher, reinjecta resultados como `role: tool` y vuelve a llamar al modelo hasta que devuelva texto.
+- Helpers internos: `_serialize_assistant_message` (convierte respuesta SDK → dict), `_execute_tool_calls`, `_trim_history` (cap 40 + descarta `role: tool` huérfano).
+- `SYSTEM_PROMPT` con sección "HERRAMIENTAS" listando cuándo usar cada tool; refuerzo "no inventes, llama a `find_activity` primero".
+- `generate_daily_briefing` NO usa tools (un solo round-trip, dump sigue suficiente).
+- Caps defensivos en handlers: `MAX_WINDOW_DAYS=90`, `MAX_ACTIVITIES_RESULT=25`.
+- Tests: `test_coach_tools.py` (33) + tool-loop tests en `test_coach.py`. Suite 175 passed, 89.17% coverage.
+- Hotfix `tool_use_failed`: Llama 3.3 a veces emite tags `<function=…>` literales y Groq devuelve 400 con la generación en `body.error.failed_generation`. Recovery dos pasos: (1) `_parse_function_tag` extrae `(name, args)` con regex (variantes con/sin paréntesis), inyecta assistant sintético con `tool_calls` + `role: tool` con resultado y continúa el loop; (2) si sólo hay prosa, `_salvage_tool_use_failed` strip-ea los tags y devuelve el texto. Otros 400 propagan al fallback "❌". Prompt reforzado con bloque "REGLAS DE TOOL USE" prohibiendo emitir texto + función en el mismo turno.
+- Modelo cambiado a `meta-llama/llama-4-scout-17b-16e-instruct` (tool calling más fiable que `llama-3.3-70b-versatile`).
+- Detalle: `docs/implementations/coach_tool_calling.md`.
+
+## Implemented: coach quality Fase 3 — personal records (`garmin_coach/db.py`, `garmin_coach/coach_tools.py`, `garmin_coach/coach.py`)
+
+- `purge_old_data` ya NO borra `activities` (sólo wellness). Garantiza que medias maratones, maratones y PRs históricos sobreviven indefinidamente. `removed["activities"]` siempre `0`.
+- Nueva tool `get_personal_records()` calcula al vuelo desde la tabla activities: mejor tiempo en 1K, 5K, 10K, half_marathon (21097 m), marathon (42195 m) con tolerancias ±2-5%, y `longest_run` (carrera más larga). Sólo runs (`_RUN_TYPES`), ignora ciclismo. Devuelve `{activityId, date, distance_km, duration_hms, pace_min_per_km, averageHR}` por slot.
+- `SYSTEM_PROMPT` instruye usar `get_personal_records` para PB / mejor marca / récord / tirada más larga.
+- Tests: `test_purge_keeps_old_activities`, suite PRs (10 nuevos en `test_coach_tools.py`). Suite 200 passed, 89.81% coverage.
+- Detalle: `docs/implementations/coach_quality_phase3.md`.
 
 ## Implemented: smart sync window + purge (`garmin_coach/db.py`, `garmin_coach/garmin_sync.py`)
 

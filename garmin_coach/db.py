@@ -68,21 +68,21 @@ def get_context_for_ai(days: int = 14) -> dict:
             reverse=True,
         )
 
-    training_status    = _date_sorted("training_status")
+    training_status = _date_sorted("training_status")
     training_readiness = _date_sorted("training_readiness")
-    respiration        = _date_sorted("respiration")
-    spo2               = _date_sorted("spo2")
-    stress             = _date_sorted("stress")
+    respiration = _date_sorted("respiration")
+    spo2 = _date_sorted("spo2")
+    stress = _date_sorted("stress")
 
     # Fitness snapshot — most recent record of each
     def _latest(table_name):
         records = db.table(table_name).all()
         return max(records, key=lambda x: x.get("date", "")) if records else None
 
-    fitness_metrics  = _latest("fitness_metrics")
+    fitness_metrics = _latest("fitness_metrics")
     race_predictions = _latest("race_predictions")
     lactate_threshold = _latest("lactate_threshold")
-    endurance_score  = _latest("endurance_score")
+    endurance_score = _latest("endurance_score")
 
     # Memoria del entrenador (notas guardadas)
     memory = db.table("memory").all()
@@ -113,6 +113,7 @@ def get_compact_context_for_ai(days: int = 7, max_activities: int = 10) -> dict:
     del JSON inyectado en el prompt y evitar `context_length_exceeded`.
     """
     from garmin_coach.context_builder import build_context
+
     raw = get_context_for_ai(days=days)
     return build_context(raw, max_activities=max_activities)
 
@@ -148,24 +149,31 @@ def get_last_date_in_db() -> str | None:
 
 
 def purge_old_data(days: int = 30) -> dict:
-    """Remove records older than `days` days from all data tables. Returns removed counts."""
+    """Remove records older than `days` days from wellness tables. Returns removed counts.
+
+    NOTE: `activities` is intentionally NOT purged. Activities feed personal records
+    and historical comparisons (half-marathon hace 4 meses, etc.) and are small enough
+    to keep indefinitely.
+    """
     from datetime import date, timedelta
+
     from tinydb import Query
 
     db = get_db()
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     Q = Query()
-    removed = {}
+    removed = {"activities": 0}
 
-    act_table = db.table("activities")
-    old_acts = act_table.search(
-        Q.startTimeLocal.test(lambda v: bool(v) and v[:10] < cutoff)
-    )
-    removed["activities"] = len(old_acts)
-    act_table.remove(Q.startTimeLocal.test(lambda v: bool(v) and v[:10] < cutoff))
-
-    for table_name in ("sleep", "hrv", "body_battery",
-                        "training_status", "training_readiness", "respiration", "spo2", "stress"):
+    for table_name in (
+        "sleep",
+        "hrv",
+        "body_battery",
+        "training_status",
+        "training_readiness",
+        "respiration",
+        "spo2",
+        "stress",
+    ):
         table = db.table(table_name)
         old = table.search(Q.date < cutoff)
         removed[table_name] = len(old)
@@ -177,11 +185,14 @@ def purge_old_data(days: int = 30) -> dict:
 def save_memory(note: str):
     """Guarda una nota de memoria del entrenador."""
     from datetime import datetime, timezone
+
     db = get_db()
-    db.table("memory").insert({
-        "note": note,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    db.table("memory").insert(
+        {
+            "note": note,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
 
 
 def get_last_sync() -> str | None:
@@ -197,8 +208,11 @@ def get_last_sync() -> str | None:
 def log_sync(summary: dict):
     """Registra cuándo se hizo el último sync."""
     from datetime import datetime, timezone
+
     db = get_db()
-    db.table("sync_log").insert({
-        "synced_at": datetime.now(timezone.utc).isoformat(),
-        "summary": summary,
-    })
+    db.table("sync_log").insert(
+        {
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+            "summary": summary,
+        }
+    )
