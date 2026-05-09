@@ -61,8 +61,13 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 | `garmin_coach/prompts/coach_system.txt` | SYSTEM_PROMPT como recurso de texto plano. `prompts/__init__.read_system_prompt()` lo carga. CoachSession lo usará en Fase 3. |
 | `garmin_coach/bot.py` | All Telegram handlers; per-user `CoachSession` stored in `_sessions` dict |
 | `garmin_coach/coach.py` | `CoachSession` class (in-memory conversation history, max 40 messages); `generate_daily_briefing` for scheduled messages; usa LangChain (`langchain-groq.ChatGroq`) sobre `meta-llama/llama-4-scout-17b-16e-instruct`. Dos clientes: `chat_client` (con `bind_tools(TOOLS_SPEC)`) y `briefing_client`. La recuperación de `tool_use_failed` sigue usando `groq.BadRequestError` porque ChatGroq propaga la excepción del SDK subyacente. |
-| `garmin_coach/garmin_sync.py` | Garmin auth with session persistence at `/data/garmin_session.json`; MFA flow via Telegram (`/mfa` command + threading.Event); `sync_all` fetches activities, sleep, HRV, body battery |
-| `garmin_coach/db.py` | **Shim de retrocompat — se elimina en Fase 3.** Expone la misma API pública que antes pero delega internamente a las clases repo. El global `_db_instance` se mantiene para que los tests legacy con `patch("garmin_coach.db._db_instance", mock)` sigan funcionando. |
+| `garmin_coach/garmin_sync.py` | **Shim temporal — se elimina en Fase 5.** Reexporta `set_bot_app`, `set_event_loop`, `provide_mfa_code`, `sync_all` delegando a `Container.mfa_handler` y `Container.sync_service`. Cero lógica propia. |
+| `garmin_coach/db.py` | **Shim de retrocompat — se elimina en Fase 5.** Expone la misma API pública que antes pero delega internamente a las clases repo. El global `_db_instance` se mantiene para que los tests legacy con `patch("garmin_coach.db._db_instance", mock)` sigan funcionando. |
+| `garmin_coach/infrastructure/garmin/mfa_handler.py` | `MFAHandler` — encapsula `threading.Event` + código MFA; `provide_code()`, `wait_for_code(timeout)`, `notify_user(msg)`, `set_notifier(fn)`, `clear()`. Cero globales. |
+| `garmin_coach/infrastructure/garmin/client.py` | `GarminClient(settings, mfa_handler)` — auth con sesión persistida; `authenticate()` lazy + cache; `reset()`. |
+| `garmin_coach/infrastructure/garmin/data_fetcher.py` | `GarminDataFetcher(garmin)` — un método por endpoint (activities/sleep/hrv/body_battery/training_status/training_readiness/respiration/spo2/stress/fitness_metrics/race_predictions/lactate_threshold/endurance_score). Pure fetch, sin upserts. |
+| `garmin_coach/services/sync_service.py` | `SyncService(garmin_client, fetcher_factory, repositories, sync_log_repo, settings)` — `run() -> SyncSummary`; orquesta auth→fetch→merge→upsert→purge→log. `SyncSummary` frozen dataclass con contadores + `as_dict()`. |
+| `garmin_coach/services/sync_helpers.py` | Funciones puras: `daterange(start, end)`, `compute_sync_window(repos, default_days)`, `merge_activity_details(activities, detail_fetcher)`. |
 | `garmin_coach/context_builder.py` | `slim_*` projections + `aggregate_series` + `build_context` to compact TinyDB records before sending to Groq (avoids `context_length_exceeded`) |
 | `garmin_coach/coach_tools.py` | Function-calling tools (find_activity, get_recent_activities, get_*_window, get_fitness_snapshot, search_memory) + `dispatch_tool_call`. Used by `CoachSession.chat` tool loop. |
 | `garmin_coach/domain/activity.py` | `ActivityType(StrEnum)` con `is_run()`/`is_distance_based()`; `Activity` frozen dataclass; `RUN_TYPES`/`NON_DISTANCE_TYPES` frozensets para retrocompat con context_builder/coach_tools |
@@ -86,7 +91,7 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 
 ### MFA handling
 
-Garmin Connect sometimes requires MFA. Flow: sync thread blocks on `threading.Event` → bot sends Telegram message → user replies `/mfa <code>` → `provide_mfa_code()` unblocks the event. Timeout: 5 minutes.
+Garmin Connect sometimes requires MFA. Flow: `GarminClient.authenticate()` passes `prompt_mfa` callback to `Garmin()`; callback calls `MFAHandler.notify_user()` + `MFAHandler.wait_for_code()` (blocks up to 300s). Bot's `/mfa <code>` handler calls `provide_mfa_code()` → `MFAHandler.provide_code()` unblocks the wait. In Fase 5 the loop capture moves to `TelegramBotApp._on_startup`; currently wired via the shim in `garmin_sync.py`.
 
 ### Data persistence
 
@@ -207,6 +212,19 @@ All specs implemented. See `docs/implementations/` for technical details.
 - `db.py` convertido en shim delgado: misma API pública, delega a repos. `_db_instance` global conservado para seam de patch en tests legacy. Se elimina en Fase 3.
 - `Container._build_repositories()` instancia todos los repos (preparado para Fase 3-5).
 - 163 tests nuevos (363 total), 93.12% coverage. Detalle: `docs/implementations/refactor_oop_phase_2.md`.
+
+## Implemented: Refactor OOP Fase 4 — Garmin client + MFA handler + SyncService
+
+- `MFAHandler` (mfa_handler.py) — encapsula `threading.Event` + código MFA; cero globales; `set_notifier(fn)` inyectable.
+- `GarminClient(settings, mfa_handler)` (client.py) — auth lazy con sesión persistida; `authenticate()` cacheado; `reset()`.
+- `GarminDataFetcher(garmin)` (data_fetcher.py) — 14 métodos pure-fetch, uno por endpoint; todos usan `_safe()` (excepción → None/[]).
+- `SyncService.run() -> SyncSummary` (sync_service.py) — orquesta completo: auth→window→purge→fetch→upsert→log. `SyncSummary` frozen dataclass.
+- `sync_helpers.py` — `daterange`, `compute_sync_window`, `merge_activity_details` funciones puras.
+- `garmin_sync.py` convertido en shim (~80 líneas): reexporta `set_bot_app`, `set_event_loop`, `provide_mfa_code`, `sync_all` delegando a `Container`. Marcado para eliminación en Fase 5.
+- Globales eliminados de la lógica: `_mfa_event`, `_mfa_code`, `_bot_app`, `_bot_loop` — ahora encapsulados en `MFAHandler`.
+- Tests legacy `tests/test_garmin_sync.py` eliminados (15); reemplazados por 66 tests nuevos en `tests/infrastructure/garmin/` y `tests/services/`.
+- Race condition en `test_authenticate_mfa_flow` resuelta con `threading.Event` de sincronización entre hilo proveedor y el que llama `wait_for_code`.
+- Suite: 574 passed, 95.50% coverage. Detalle: `docs/implementations/refactor_oop_phase_4.md`.
 
 ## Implemented: smart sync window + purge (`garmin_coach/db.py`, `garmin_coach/garmin_sync.py`)
 

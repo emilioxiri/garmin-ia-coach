@@ -4,7 +4,8 @@ Dependency container.
 Phase 1: Settings skeleton.
 Phase 2: TinyDBFactory + repositories wired.
 Phase 3: LLMClient + ToolRegistry + ContextBuilder + CoachService + BriefingService.
-Phases 4-5 will complete the OOP wiring.
+Phase 4: MFAHandler + GarminClient + SyncService wired.
+Phase 5 will complete Telegram bot OOP wiring.
 """
 
 from __future__ import annotations
@@ -45,6 +46,9 @@ class Container:
         self._system_prompt: str | None = None
         self.coach_service = self._build_coach_service()
         self.briefing_service = self._build_briefing_service()
+        self.mfa_handler = self._build_mfa_handler()
+        self.garmin_client = self._build_garmin_client()
+        self.sync_service = self._build_sync_service()
 
     def _build_repositories(self) -> Repositories:
         from garmin_coach.infrastructure.db.activity_repository import (
@@ -184,6 +188,28 @@ class Container:
             self.llm_client,
             self.context_builder,
             self._get_system_prompt(),
+        )
+
+    def _build_mfa_handler(self):
+        from garmin_coach.infrastructure.garmin.mfa_handler import MFAHandler
+
+        return MFAHandler(timeout_seconds=300)
+
+    def _build_garmin_client(self):
+        from garmin_coach.infrastructure.garmin.client import GarminClient
+
+        return GarminClient(self.settings, self.mfa_handler)
+
+    def _build_sync_service(self):
+        from garmin_coach.infrastructure.garmin.data_fetcher import GarminDataFetcher
+        from garmin_coach.services.sync_service import SyncService
+
+        return SyncService(
+            garmin_client=self.garmin_client,
+            fetcher_factory=lambda g: GarminDataFetcher(g),
+            repositories=self.repositories,
+            sync_log_repo=self.repositories.sync_log,
+            settings=self.settings,
         )
 
     def run(self) -> None:
