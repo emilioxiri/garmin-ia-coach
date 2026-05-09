@@ -5,10 +5,42 @@ import json
 from langchain_core.messages import AIMessage
 
 from garmin_coach.infrastructure.llm.message_helpers import (
+    coerce_content_to_text,
     normalize_tool_calls,
     serialize_assistant_message,
     trim_history,
 )
+
+
+def test_coerce_content_passes_string():
+    assert coerce_content_to_text("hola") == "hola"
+
+
+def test_coerce_content_handles_none():
+    assert coerce_content_to_text(None) == ""
+
+
+def test_coerce_content_flattens_typed_blocks():
+    blocks = [
+        {"type": "text", "text": "[{"},
+        {"type": "text", "text": '"name": "x"}]'},
+    ]
+    assert coerce_content_to_text(blocks) == '[{"name": "x"}]'
+
+
+def test_coerce_content_skips_non_text_blocks():
+    blocks = [
+        {"type": "text", "text": "hi "},
+        {"type": "image", "url": "x"},
+        "raw",
+    ]
+    assert coerce_content_to_text(blocks) == "hi raw"
+
+
+def test_serialize_assistant_message_flattens_list_content():
+    msg = AIMessage(content=[{"type": "text", "text": "foo"}])
+    out = serialize_assistant_message(msg)
+    assert out["content"] == "foo"
 
 
 def _ai(content="ok", tool_calls=None, invalid_tool_calls=None):

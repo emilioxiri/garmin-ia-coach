@@ -274,3 +274,48 @@ def test_chat_propagates_non_tool_use_400():
     session = _session(llm=llm)
     result = session.chat("hola")
     assert result.startswith("❌")
+
+
+def test_chat_recovers_inline_json_when_content_is_list_blocks():
+    """Newer langchain_groq returns content as `[{type:text,text:...}]`. Recover."""
+    inline_blocks = [
+        {
+            "type": "text",
+            "text": '[{"name": "find_activity", "parameters": {"date_iso": "2026-05-05"}}]',
+        }
+    ]
+    llm = _fake_llm(_ai(inline_blocks), _ai("Hecho."))
+    registry = _fake_registry(dispatch_result=[{"activityId": "9"}])
+    session = _session(llm=llm, registry=registry)
+
+    result = session.chat("¿qué tal?")
+
+    assert result == "Hecho."
+    registry.dispatch.assert_called_once_with(
+        "find_activity", {"date_iso": "2026-05-05"}
+    )
+
+
+def test_chat_recovers_inline_json_tool_call():
+    """LLM emits `[{"name": ..., "parameters": ...}]` as content; we recover."""
+    inline_text = (
+        '[{"name": "find_activity", "parameters": {"date_iso": "2026-05-05"}}]'
+    )
+    llm = _fake_llm(_ai(inline_text), _ai("PB sólido. Te veo fino."))
+    registry = _fake_registry(dispatch_result=[{"activityId": "9"}])
+    session = _session(llm=llm, registry=registry)
+
+    result = session.chat("¿Qué tal mi PB?")
+
+    assert result == "PB sólido. Te veo fino."
+    registry.dispatch.assert_called_once_with(
+        "find_activity", {"date_iso": "2026-05-05"}
+    )
+    tool_msg = next(m for m in session.history if m.get("role") == "tool")
+    assert tool_msg["name"] == "find_activity"
+    assistant_with_tools = next(
+        m
+        for m in session.history
+        if m.get("role") == "assistant" and m.get("tool_calls")
+    )
+    assert assistant_with_tools["content"] is None

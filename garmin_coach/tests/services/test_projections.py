@@ -278,3 +278,217 @@ def test_slim_endurance_score_extracts_overall():
     record = {"date": "2025-05-01", "data": {"overallScore": 78}}
     out = slim_endurance_score(record)
     assert out["score"] == 78
+
+
+# ── _pace_to_seconds ──────────────────────────────────────────────────────────
+
+
+def test_pace_to_seconds_valid():
+    from garmin_coach.services.projections import _pace_to_seconds
+
+    assert _pace_to_seconds("5:30") == 330
+    assert _pace_to_seconds("4:00") == 240
+
+
+def test_pace_to_seconds_invalid():
+    from garmin_coach.services.projections import _pace_to_seconds
+
+    assert _pace_to_seconds(None) is None
+    assert _pace_to_seconds("abc") is None
+    assert _pace_to_seconds("5") is None
+    assert _pace_to_seconds("a:b") is None
+
+
+# ── compute_hrv_trend ─────────────────────────────────────────────────────────
+
+
+def test_compute_hrv_trend_descending():
+    from garmin_coach.services.projections import compute_hrv_trend
+
+    records = [
+        {"date": "2025-05-09", "lastNight": 50},
+        {"date": "2025-05-08", "lastNight": 55},
+        {"date": "2025-05-07", "lastNight": 60},
+        {"date": "2025-05-06", "lastNight": 65},
+    ]
+    out = compute_hrv_trend(records, days=14)
+    assert out["direction"] == "descendiendo"
+    assert out["slope_per_day"] < 0
+    assert out["n"] == 4
+
+
+def test_compute_hrv_trend_ascending():
+    from garmin_coach.services.projections import compute_hrv_trend
+
+    records = [
+        {"date": "2025-05-09", "lastNight": 70},
+        {"date": "2025-05-08", "lastNight": 65},
+        {"date": "2025-05-07", "lastNight": 60},
+    ]
+    out = compute_hrv_trend(records, days=14)
+    assert out["direction"] == "subiendo"
+    assert out["slope_per_day"] > 0
+
+
+def test_compute_hrv_trend_stable():
+    from garmin_coach.services.projections import compute_hrv_trend
+
+    records = [
+        {"date": "2025-05-09", "lastNight": 60},
+        {"date": "2025-05-08", "lastNight": 60.05},
+        {"date": "2025-05-07", "lastNight": 59.9},
+    ]
+    out = compute_hrv_trend(records, days=14)
+    assert out["direction"] == "estable"
+
+
+def test_compute_hrv_trend_too_few_records():
+    from garmin_coach.services.projections import compute_hrv_trend
+
+    assert compute_hrv_trend([], days=14) is None
+    assert compute_hrv_trend([{"lastNight": 50}, {"lastNight": 55}], days=14) is None
+
+
+def test_compute_hrv_trend_skips_non_numeric():
+    from garmin_coach.services.projections import compute_hrv_trend
+
+    records = [
+        {"date": "2025-05-09", "lastNight": None},
+        {"date": "2025-05-08", "lastNight": "bad"},
+        {"date": "2025-05-07", "lastNight": 60},
+    ]
+    assert compute_hrv_trend(records, days=14) is None
+
+
+# ── compute_weekly_load ───────────────────────────────────────────────────────
+
+
+def test_compute_weekly_load_with_chronic_history():
+    from datetime import datetime, timedelta
+
+    from garmin_coach.services.projections import compute_weekly_load
+
+    today = datetime.now().date()
+
+    def _act(days_ago: int, load: float) -> dict:
+        d = (today - timedelta(days=days_ago)).isoformat()
+        return {"date": d, "activityTrainingLoad": load, "is_run": True}
+
+    acts = [
+        _act(1, 100),
+        _act(3, 80),
+        _act(8, 90),
+        _act(15, 85),
+        _act(22, 70),
+    ]
+    out = compute_weekly_load(acts)
+    assert out["weekly_load"] == 180.0
+    assert out["acwr"] is not None
+    assert out["chronic_avg"] is not None
+
+
+def test_compute_weekly_load_no_chronic():
+    from datetime import datetime
+
+    from garmin_coach.services.projections import compute_weekly_load
+
+    today = datetime.now().date()
+    acts = [{"date": today.isoformat(), "activityTrainingLoad": 50}]
+    out = compute_weekly_load(acts)
+    assert out["weekly_load"] == 50.0
+    assert out["acwr"] is None
+
+
+def test_compute_weekly_load_empty():
+    from garmin_coach.services.projections import compute_weekly_load
+
+    assert compute_weekly_load([]) is None
+
+
+def test_compute_weekly_load_ignores_invalid_dates():
+    from garmin_coach.services.projections import compute_weekly_load
+
+    acts = [{"date": "not-a-date", "activityTrainingLoad": 50}]
+    out = compute_weekly_load(acts)
+    assert out["weekly_load"] == 0.0
+
+
+# ── compute_resting_hr_trend ──────────────────────────────────────────────────
+
+
+def test_compute_resting_hr_trend_full_window():
+    from garmin_coach.services.projections import compute_resting_hr_trend
+
+    records = [
+        {"date": f"2025-05-{15 - i:02d}", "restingHR": 50 + i} for i in range(14)
+    ]
+    out = compute_resting_hr_trend(records)
+    assert out["last_week_mean"] is not None
+    assert out["prior_week_mean"] is not None
+    assert out["delta"] is not None
+
+
+def test_compute_resting_hr_trend_only_last_week():
+    from garmin_coach.services.projections import compute_resting_hr_trend
+
+    records = [{"date": f"2025-05-{9 - i:02d}", "restingHR": 55} for i in range(5)]
+    out = compute_resting_hr_trend(records)
+    assert out["last_week_mean"] == 55.0
+    assert out["delta"] is None
+
+
+def test_compute_resting_hr_trend_too_few():
+    from garmin_coach.services.projections import compute_resting_hr_trend
+
+    assert compute_resting_hr_trend([]) is None
+    assert (
+        compute_resting_hr_trend(
+            [{"restingHR": 55}, {"restingHR": 56}, {"restingHR": 54}]
+        )
+        is None
+    )
+
+
+# ── compute_fastest_runs ──────────────────────────────────────────────────────
+
+
+def test_compute_fastest_runs_orders_by_pace():
+    from garmin_coach.services.projections import compute_fastest_runs
+
+    acts = [
+        {"is_run": True, "distance_km": 10, "pace_min_per_km": "4:30"},
+        {"is_run": True, "distance_km": 5, "pace_min_per_km": "4:00"},
+        {"is_run": True, "distance_km": 8, "pace_min_per_km": "4:15"},
+    ]
+    out = compute_fastest_runs(acts, top_n=3)
+    assert [a["pace_min_per_km"] for a in out] == ["4:00", "4:15", "4:30"]
+
+
+def test_compute_fastest_runs_filters_short():
+    from garmin_coach.services.projections import compute_fastest_runs
+
+    acts = [
+        {"is_run": True, "distance_km": 1.5, "pace_min_per_km": "3:30"},
+        {"is_run": True, "distance_km": 5, "pace_min_per_km": "4:30"},
+    ]
+    out = compute_fastest_runs(acts, min_distance_km=3.0)
+    assert len(out) == 1
+    assert out[0]["pace_min_per_km"] == "4:30"
+
+
+def test_compute_fastest_runs_skips_non_runs():
+    from garmin_coach.services.projections import compute_fastest_runs
+
+    acts = [
+        {"is_run": False, "distance_km": 30, "pace_min_per_km": "3:00"},
+        {"is_run": True, "distance_km": 5, "pace_min_per_km": "5:00"},
+    ]
+    out = compute_fastest_runs(acts)
+    assert len(out) == 1
+    assert out[0]["pace_min_per_km"] == "5:00"
+
+
+def test_compute_fastest_runs_empty():
+    from garmin_coach.services.projections import compute_fastest_runs
+
+    assert compute_fastest_runs([]) == []

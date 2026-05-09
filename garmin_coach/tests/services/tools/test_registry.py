@@ -62,6 +62,14 @@ def test_registry_dispatch_crash():
     assert "fail" in result["error"]
 
 
+def test_registry_dispatch_strips_none_args_so_defaults_apply():
+    """LLM frequently emits `{"a": null, "b": null}`; defaults must survive."""
+    registry = ToolRegistry()
+    registry.register(_AddTool())
+    result = registry.dispatch("add", {"a": None, "b": None})
+    assert result == {"sum": 0}
+
+
 def test_registry_multiple_tools_specs_order():
     registry = ToolRegistry()
     registry.register(_AddTool())

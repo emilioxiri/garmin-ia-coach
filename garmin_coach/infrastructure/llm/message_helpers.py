@@ -8,9 +8,34 @@ from __future__ import annotations
 import json
 
 
+def coerce_content_to_text(content: object) -> str:
+    """Flatten LangChain `AIMessage.content` to a plain string.
+
+    Newer langchain_groq versions return content as a list of typed blocks
+    (e.g. `[{"type": "text", "text": "..."}]`). Downstream parsers expect
+    plain strings, so collapse list/None/other shapes safely.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return str(content)
+
+
 def serialize_assistant_message(msg: object) -> dict:
     """Convert a LangChain AIMessage (with possible tool_calls) into a history dict."""
-    out: dict = {"role": "assistant", "content": getattr(msg, "content", None) or None}
+    text = coerce_content_to_text(getattr(msg, "content", None))
+    out: dict = {"role": "assistant", "content": text or None}
     tool_calls = getattr(msg, "tool_calls", None) or []
     if tool_calls:
         out["tool_calls"] = [

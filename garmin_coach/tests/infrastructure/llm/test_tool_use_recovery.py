@@ -124,3 +124,76 @@ def test_salvage_returns_none_when_only_function_tag():
 def test_salvage_returns_none_on_missing_generation():
     err = _bad_request({"error": {"code": "tool_use_failed"}})
     assert salvage_tool_use_failed(err) is None
+
+
+# ── parse_inline_tool_calls ───────────────────────────────────────────────────
+
+
+def test_parse_inline_tool_calls_array_with_parameters():
+    from garmin_coach.infrastructure.llm.tool_use_recovery import (
+        parse_inline_tool_calls,
+    )
+
+    text = '[{"name": "find_activity", "parameters": {"date_iso": "2026-05-05"}}]'
+    assert parse_inline_tool_calls(text) == [
+        ("find_activity", {"date_iso": "2026-05-05"})
+    ]
+
+
+def test_parse_inline_tool_calls_single_object_arguments():
+    from garmin_coach.infrastructure.llm.tool_use_recovery import (
+        parse_inline_tool_calls,
+    )
+
+    text = '{"name": "get_fitness_snapshot", "arguments": {}}'
+    assert parse_inline_tool_calls(text) == [("get_fitness_snapshot", {})]
+
+
+def test_parse_inline_tool_calls_args_as_string():
+    from garmin_coach.infrastructure.llm.tool_use_recovery import (
+        parse_inline_tool_calls,
+    )
+
+    text = '{"name": "find_activity", "args": "{\\"weekday\\": \\"viernes\\"}"}'
+    assert parse_inline_tool_calls(text) == [("find_activity", {"weekday": "viernes"})]
+
+
+def test_parse_inline_tool_calls_multiple_in_array():
+    from garmin_coach.infrastructure.llm.tool_use_recovery import (
+        parse_inline_tool_calls,
+    )
+
+    text = (
+        '[{"name": "get_personal_records", "parameters": {}}, '
+        '{"name": "get_fitness_snapshot", "parameters": {}}]'
+    )
+    assert parse_inline_tool_calls(text) == [
+        ("get_personal_records", {}),
+        ("get_fitness_snapshot", {}),
+    ]
+
+
+def test_parse_inline_tool_calls_returns_none_on_plain_prose():
+    from garmin_coach.infrastructure.llm.tool_use_recovery import (
+        parse_inline_tool_calls,
+    )
+
+    assert parse_inline_tool_calls("La carrera del viernes fue sólida.") is None
+
+
+def test_parse_inline_tool_calls_returns_none_on_empty():
+    from garmin_coach.infrastructure.llm.tool_use_recovery import (
+        parse_inline_tool_calls,
+    )
+
+    assert parse_inline_tool_calls("") is None
+    assert parse_inline_tool_calls(None) is None
+
+
+def test_parse_inline_tool_calls_skips_invalid_entries():
+    from garmin_coach.infrastructure.llm.tool_use_recovery import (
+        parse_inline_tool_calls,
+    )
+
+    text = '[{"name": "good", "parameters": {}}, {"no_name_here": true}]'
+    assert parse_inline_tool_calls(text) == [("good", {})]

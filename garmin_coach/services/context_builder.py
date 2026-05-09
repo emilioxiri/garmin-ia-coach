@@ -10,13 +10,17 @@ from datetime import date, timedelta
 
 from garmin_coach.services.projections import (
     aggregate_series,
+    compute_fastest_runs,
+    compute_hrv_trend,
+    compute_resting_hr_trend,
+    compute_weekly_load,
     slim_activity,
     slim_body_battery,
     slim_endurance_score,
     slim_fitness_metrics,
     slim_hrv,
-    slim_race_predictions,
     slim_lactate_threshold,
+    slim_race_predictions,
     slim_respiration,
     slim_sleep,
     slim_spo2,
@@ -139,9 +143,13 @@ def _compact(raw: dict, *, max_activities: int = 15) -> dict:
         key=lambda a: a["distance_km"],
         reverse=True,
     )[:NOTABLE_RUNS_LIMIT]
+    fastest_runs = compute_fastest_runs(slim_acts)
 
     sleep_records = [slim_sleep(s) for s in raw.get("sleep", [])]
     hrv_records = [slim_hrv(h) for h in raw.get("hrv", [])]
+    hrv_trend_14d = compute_hrv_trend(hrv_records, days=14)
+    weekly_load = compute_weekly_load(slim_acts)
+    resting_hr_trend = compute_resting_hr_trend(sleep_records)
     bb_records = [slim_body_battery(b) for b in raw.get("body_battery", [])]
     resp_records = [slim_respiration(r) for r in raw.get("respiration", [])]
     spo2_records = [slim_spo2(s) for s in raw.get("spo2", [])]
@@ -153,6 +161,11 @@ def _compact(raw: dict, *, max_activities: int = 15) -> dict:
         "days_covered": raw.get("days_covered"),
         "activities": activities,
         "notable_runs": notable_runs,
+        "fastest_runs": fastest_runs,
+        "hrv_trend_14d": hrv_trend_14d,
+        "weekly_load": weekly_load.get("weekly_load") if weekly_load else None,
+        "acwr": weekly_load.get("acwr") if weekly_load else None,
+        "resting_hr_trend": resting_hr_trend,
         "sleep": {
             "recent": sleep_records[:7],
             "score_summary": aggregate_series(sleep_records, "score"),

@@ -309,3 +309,148 @@ def slim_endurance_score(record: dict | None) -> dict | None:
     if isinstance(data, dict):
         score = data.get("overallScore") or data.get("enduranceScore")
     return {"date": record.get("date"), "score": score}
+
+
+def _pace_to_seconds(pace: str | None) -> float | None:
+    """Parse 'M:SS' pace string into seconds-per-km. Returns None if malformed."""
+    if not isinstance(pace, str) or ":" not in pace:
+        return None
+    try:
+        m, s = pace.split(":", 1)
+        return int(m) * 60 + int(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def compute_hrv_trend(hrv_records: list[dict], days: int = 14) -> dict | None:
+    """Linear slope of `lastNight` HRV over the most recent `days` records.
+
+    Records expected sorted desc by date. Returns slope ms/day + categorical
+    direction ('subiendo', 'estable', 'descendiendo'). None if <3 valid points.
+    """
+    series = [
+        r["lastNight"]
+        for r in hrv_records[:days]
+        if isinstance(r.get("lastNight"), (int, float))
+    ]
+    if len(series) < 3:
+        return None
+    series_chrono = list(reversed(series))
+    n = len(series_chrono)
+    xs = list(range(n))
+    x_mean = sum(xs) / n
+    y_mean = sum(series_chrono) / n
+    num = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, series_chrono))
+    den = sum((x - x_mean) ** 2 for x in xs)
+    if den == 0:
+        return None
+    slope = num / den
+    if slope >= 0.2:
+        direction = "subiendo"
+    elif slope <= -0.2:
+        direction = "descendiendo"
+    else:
+        direction = "estable"
+    return {
+        "slope_per_day": round(slope, 2),
+        "direction": direction,
+        "n": n,
+        "first": _coerce_number(series_chrono[0]),
+        "last": _coerce_number(series_chrono[-1]),
+    }
+
+
+def compute_weekly_load(slim_activities: list[dict]) -> dict | None:
+    """Sum activityTrainingLoad (or duration_s fallback) for last 7 days +
+    acute:chronic workload ratio (last 7d / mean of prior 28d)."""
+    if not slim_activities:
+        return None
+    today = datetime.now().date()
+
+    def _load(act: dict) -> float:
+        v = act.get("activityTrainingLoad")
+        if isinstance(v, (int, float)):
+            return float(v)
+        return 0.0
+
+    def _date(act: dict):
+        d = act.get("date")
+        if not isinstance(d, str):
+            return None
+        try:
+            return datetime.strptime(d, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    acute = 0.0
+    chronic_buckets: list[float] = [0.0, 0.0, 0.0, 0.0]
+    for act in slim_activities:
+        d = _date(act)
+        if d is None:
+            continue
+        delta_days = (today - d).days
+        load = _load(act)
+        if 0 <= delta_days < 7:
+            acute += load
+        for i in range(4):
+            if 7 + i * 7 <= delta_days < 7 + (i + 1) * 7:
+                chronic_buckets[i] += load
+                break
+    chronic_weeks = [w for w in chronic_buckets if w > 0]
+    if not chronic_weeks:
+        return {
+            "weekly_load": round(acute, 1),
+            "acwr": None,
+            "chronic_avg": None,
+        }
+    chronic_avg = sum(chronic_weeks) / len(chronic_weeks)
+    acwr = acute / chronic_avg if chronic_avg > 0 else None
+    return {
+        "weekly_load": round(acute, 1),
+        "chronic_avg": round(chronic_avg, 1),
+        "acwr": round(acwr, 2) if acwr is not None else None,
+    }
+
+
+def compute_resting_hr_trend(slim_sleep_records: list[dict]) -> dict | None:
+    """Mean restingHR last 7d vs prior 7d (records sorted desc by date)."""
+    rhrs = [
+        r.get("restingHR")
+        for r in slim_sleep_records
+        if isinstance(r.get("restingHR"), (int, float))
+    ]
+    if len(rhrs) < 4:
+        return None
+    last_7 = rhrs[:7]
+    prior_7 = rhrs[7:14]
+    if not prior_7:
+        return {"last_week_mean": round(sum(last_7) / len(last_7), 1), "delta": None}
+    last_mean = sum(last_7) / len(last_7)
+    prior_mean = sum(prior_7) / len(prior_7)
+    return {
+        "last_week_mean": round(last_mean, 1),
+        "prior_week_mean": round(prior_mean, 1),
+        "delta": round(last_mean - prior_mean, 1),
+    }
+
+
+def compute_fastest_runs(
+    slim_activities: list[dict],
+    *,
+    min_distance_km: float = 3.0,
+    top_n: int = 3,
+) -> list[dict]:
+    """Top-N runs by best `pace_min_per_km`, filtered by min distance."""
+    candidates: list[tuple[float, dict]] = []
+    for act in slim_activities:
+        if not act.get("is_run"):
+            continue
+        dist = act.get("distance_km")
+        if not isinstance(dist, (int, float)) or dist < min_distance_km:
+            continue
+        pace_s = _pace_to_seconds(act.get("pace_min_per_km"))
+        if pace_s is None:
+            continue
+        candidates.append((pace_s, act))
+    candidates.sort(key=lambda x: x[0])
+    return [c[1] for c in candidates[:top_n]]

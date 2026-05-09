@@ -63,3 +63,88 @@ def salvage_tool_use_failed(error: BadRequestError) -> str | None:
         return None
     cleaned = FUNCTION_TAG_RE.sub("", failed).strip()
     return cleaned or None
+
+
+def _extract_balanced_json(text: str) -> list[str]:
+    """Yield top-level JSON arrays/objects found in `text`, balancing braces.
+
+    Skips brackets/braces inside string literals (incl. escaped quotes).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in "[{":
+            close = "]" if ch == "[" else "}"
+            depth = 0
+            in_str = False
+            esc = False
+            j = i
+            while j < n:
+                c = text[j]
+                if in_str:
+                    if esc:
+                        esc = False
+                    elif c == "\\":
+                        esc = True
+                    elif c == '"':
+                        in_str = False
+                else:
+                    if c == '"':
+                        in_str = True
+                    elif c == ch:
+                        depth += 1
+                    elif c == close:
+                        depth -= 1
+                        if depth == 0:
+                            out.append(text[i : j + 1])
+                            i = j + 1
+                            break
+                j += 1
+            else:
+                break
+            continue
+        i += 1
+    return out
+
+
+def parse_inline_tool_calls(text: str) -> list[tuple[str, dict]] | None:
+    """Parse JSON-shaped tool calls emitted as plain text instead of via the
+    native tool_calls channel.
+
+    Llama-4 Scout sometimes outputs `[{"name": "find_activity", "parameters":
+    {...}}]` (or a single object) inside `content`. We extract every valid
+    `{name, args|parameters|arguments}` entry. Returns list of (name, args) or
+    None if nothing is recoverable.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    out: list[tuple[str, dict]] = []
+    for snippet in _extract_balanced_json(text):
+        try:
+            parsed = json.loads(snippet)
+        except json.JSONDecodeError:
+            continue
+        items = parsed if isinstance(parsed, list) else [parsed]
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if not isinstance(name, str):
+                continue
+            args = (
+                entry.get("arguments")
+                or entry.get("parameters")
+                or entry.get("args")
+                or {}
+            )
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
+            out.append((name, args))
+    return out or None

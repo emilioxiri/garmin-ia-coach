@@ -16,12 +16,17 @@ class ChatGroqClient(LLMClient):
     def __init__(
         self,
         model: str,
-        chat_max_tokens: int = 1200,
-        briefing_max_tokens: int = 1000,
+        chat_max_tokens: int = 2400,
+        briefing_max_tokens: int = 1800,
+        temperature: float = 0.85,
     ) -> None:
         self._model = model
-        self._chat_client = ChatGroq(model=model, max_tokens=chat_max_tokens)
-        self._briefing_client = ChatGroq(model=model, max_tokens=briefing_max_tokens)
+        self._chat_client = ChatGroq(
+            model=model, max_tokens=chat_max_tokens, temperature=temperature
+        )
+        self._briefing_client = ChatGroq(
+            model=model, max_tokens=briefing_max_tokens, temperature=temperature
+        )
 
     def chat(
         self,

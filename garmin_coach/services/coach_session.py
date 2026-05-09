@@ -12,6 +12,7 @@ import logging
 from groq import BadRequestError
 
 from garmin_coach.infrastructure.llm.message_helpers import (
+    coerce_content_to_text,
     normalize_tool_calls,
     serialize_assistant_message,
     trim_history,
@@ -19,6 +20,7 @@ from garmin_coach.infrastructure.llm.message_helpers import (
 from garmin_coach.infrastructure.llm.tool_use_recovery import (
     failed_generation_payload,
     parse_function_tag,
+    parse_inline_tool_calls,
     salvage_tool_use_failed,
 )
 
@@ -129,10 +131,23 @@ class CoachSession:
                     break
 
                 self.history.append(serialize_assistant_message(response))
-                assistant_message = getattr(response, "content", "") or ""
+                assistant_message = coerce_content_to_text(
+                    getattr(response, "content", "")
+                )
 
                 tool_calls = normalize_tool_calls(response)
                 if not tool_calls:
+                    inline = parse_inline_tool_calls(assistant_message)
+                    if inline:
+                        logger.warning(
+                            "LLM emitted %d inline JSON tool call(s); recovering",
+                            len(inline),
+                        )
+                        synthetic = self._synthesize_inline_tool_calls(inline)
+                        self.history[-1] = synthetic["assistant_msg"]
+                        self.history.extend(synthetic["tool_msgs"])
+                        assistant_message = ""
+                        continue
                     break
                 self.history.extend(self._execute_tool_calls(tool_calls))
             else:
@@ -147,6 +162,46 @@ class CoachSession:
 
     def reset(self) -> None:
         self.history = []
+
+    def _synthesize_inline_tool_calls(self, calls: list[tuple[str, dict]]) -> dict:
+        """Build a synthetic assistant message + tool result messages from
+        tool calls that the model emitted as inline JSON in `content`.
+        Replaces the prose-only assistant turn so history stays well-formed.
+        """
+        base_id = f"inline_{len(self.history)}"
+        tool_calls_payload = []
+        tool_msgs: list[dict] = []
+        for idx, (name, args) in enumerate(calls):
+            call_id = f"{base_id}_{idx}"
+            tool_calls_payload.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(args, ensure_ascii=False),
+                    },
+                }
+            )
+            result = self._registry.dispatch(name, args)
+            try:
+                content = json.dumps(result, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                content = json.dumps({"error": "unserializable result"})
+            tool_msgs.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": name,
+                    "content": content,
+                }
+            )
+        assistant_msg = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": tool_calls_payload,
+        }
+        return {"assistant_msg": assistant_msg, "tool_msgs": tool_msgs}
 
     def _execute_tool_calls(self, tool_calls: list[dict]) -> list[dict]:
         results: list[dict] = []

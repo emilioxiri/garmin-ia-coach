@@ -32,7 +32,8 @@ class ToolRegistry:
         if tool is None:
             return {"error": f"unknown tool: {name}"}
         try:
-            result = tool.handle(**(args or {}))
+            clean_args = {k: v for k, v in (args or {}).items() if v is not None}
+            result = tool.handle(**clean_args)
             if result.error is not None:
                 return {"error": result.error}
             return result.data
