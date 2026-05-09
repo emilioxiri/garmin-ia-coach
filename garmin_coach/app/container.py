@@ -1,11 +1,7 @@
 """
 app/container.py
-Dependency container.
-Phase 1: Settings skeleton.
-Phase 2: TinyDBFactory + repositories wired.
-Phase 3: LLMClient + ToolRegistry + ContextBuilder + CoachService + BriefingService.
-Phase 4: MFAHandler + GarminClient + SyncService wired.
-Phase 5 will complete Telegram bot OOP wiring.
+Dependency container — Phase 5 final: wires all layers end-to-end.
+No delegation to legacy_bridge. No shims.
 """
 
 from __future__ import annotations
@@ -49,6 +45,12 @@ class Container:
         self.mfa_handler = self._build_mfa_handler()
         self.garmin_client = self._build_garmin_client()
         self.sync_service = self._build_sync_service()
+        self.formatter = self._build_formatter()
+        self.authorizer = self._build_authorizer()
+        self.command_handlers = self._build_command_handlers()
+        self.chat_handler = self._build_chat_handler()
+        self.bot_app = self._build_bot_app()
+        self.scheduler = self._build_scheduler()
 
     def _build_repositories(self) -> Repositories:
         from garmin_coach.infrastructure.db.activity_repository import (
@@ -212,19 +214,70 @@ class Container:
             settings=self.settings,
         )
 
-    def run(self) -> None:
-        """Start the application. Phases 1-3: delegates to legacy bot + scheduler."""
-        from garmin_coach.app.legacy_bridge import start_scheduler
-        from garmin_coach.bot import build_application
-        from garmin_coach.garmin_sync import set_bot_app
+    def _build_formatter(self):
+        from garmin_coach.infrastructure.telegram.formatter import MessageFormatter
 
-        app = build_application()
-        set_bot_app(app)
+        return MessageFormatter()
 
-        start_scheduler(
-            app,
-            morning_time=self.settings.sync_time_morning,
-            evening_time=self.settings.sync_time_evening,
+    def _build_authorizer(self):
+        from garmin_coach.infrastructure.telegram.auth import Authorizer
+
+        return Authorizer(self.settings.telegram_allowed_user_id)
+
+    def _build_command_handlers(self):
+        from garmin_coach.infrastructure.telegram.handlers.commands import (
+            CommandHandlers,
         )
 
-        app.run_polling(drop_pending_updates=True)
+        return CommandHandlers(
+            coach_service=self.coach_service,
+            briefing_service=self.briefing_service,
+            sync_service=self.sync_service,
+            mfa_handler=self.mfa_handler,
+            memory_repo=self.repositories.memory,
+            sync_log_repo=self.repositories.sync_log,
+            context_builder=self.context_builder,
+            formatter=self.formatter,
+            authorizer=self.authorizer,
+            garmin_client=self.garmin_client,
+        )
+
+    def _build_chat_handler(self):
+        from garmin_coach.infrastructure.telegram.handlers.chat import (
+            ChatMessageHandler,
+        )
+
+        return ChatMessageHandler(
+            coach_service=self.coach_service,
+            formatter=self.formatter,
+            authorizer=self.authorizer,
+        )
+
+    def _build_bot_app(self):
+        from garmin_coach.infrastructure.telegram.bot_app import TelegramBotApp
+
+        return TelegramBotApp(
+            settings=self.settings,
+            command_handlers=self.command_handlers,
+            chat_handler=self.chat_handler,
+            mfa_handler=self.mfa_handler,
+            formatter=self.formatter,
+        )
+
+    def _build_scheduler(self):
+        from garmin_coach.app.scheduler import Scheduler
+
+        return Scheduler(
+            sync_service=self.sync_service,
+            briefing_service=self.briefing_service,
+            sync_log_repo=self.repositories.sync_log,
+            bot_app=self.bot_app,
+            settings=self.settings,
+        )
+
+    def run(self) -> None:
+        self.scheduler.start()
+        try:
+            self.bot_app.run()
+        finally:
+            self.scheduler.stop()

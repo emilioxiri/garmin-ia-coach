@@ -35,7 +35,7 @@ build-backend = "poetry.core.masonry.api"
 testpaths = ["garmin_coach/tests"]
 
 [tool.coverage.run]
-omit = ["garmin_coach/bot.py", "main.py", "garmin_coach/app/legacy_bridge.py", "garmin_coach/garmin_sync.py", "garmin_coach/tests/*"]
+omit = ["main.py", "garmin_coach/tests/*"]
 
 [tool.coverage.report]
 fail_under = 85

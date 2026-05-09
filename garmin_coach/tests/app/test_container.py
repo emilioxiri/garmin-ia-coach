@@ -3,10 +3,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import garmin_coach.app.legacy_bridge as _legacy_bridge_mod
-import garmin_coach.bot as _bot_mod
-import garmin_coach.garmin_sync as _garmin_sync_mod
-
 from garmin_coach.app.config import Settings
 from garmin_coach.app.container import Container
 from garmin_coach.prompts import read_system_prompt
@@ -36,28 +32,63 @@ def test_container_stores_settings():
     assert container.settings is settings
 
 
-def test_container_run_delegates_to_legacy(monkeypatch):
+def test_container_has_all_phase5_attrs():
+    settings = _make_settings()
+    container = Container(settings)
+    # Repos
+    assert container.repositories is not None
+    # LLM + services
+    assert container.llm_client is not None
+    assert container.tool_registry is not None
+    assert container.context_builder is not None
+    assert container.coach_service is not None
+    assert container.briefing_service is not None
+    # Garmin
+    assert container.mfa_handler is not None
+    assert container.garmin_client is not None
+    assert container.sync_service is not None
+    # Telegram
+    assert container.formatter is not None
+    assert container.authorizer is not None
+    assert container.command_handlers is not None
+    assert container.chat_handler is not None
+    assert container.bot_app is not None
+    # Scheduler
+    assert container.scheduler is not None
+
+
+def test_container_run_starts_scheduler_and_calls_bot():
     settings = _make_settings()
     container = Container(settings)
 
-    fake_app = MagicMock()
-    mock_set_bot = MagicMock()
-    mock_scheduler = MagicMock()
-
-    # Container.run() uses local `from X import Y`, so patch at source modules.
-    monkeypatch.setattr(_bot_mod, "build_application", lambda: fake_app)
-    monkeypatch.setattr(_garmin_sync_mod, "set_bot_app", mock_set_bot)
-    monkeypatch.setattr(_legacy_bridge_mod, "start_scheduler", mock_scheduler)
+    scheduler_mock = MagicMock()
+    bot_mock = MagicMock()
+    container.scheduler = scheduler_mock
+    container.bot_app = bot_mock
 
     container.run()
 
-    mock_set_bot.assert_called_once_with(fake_app)
-    mock_scheduler.assert_called_once_with(
-        fake_app,
-        morning_time="07:00",
-        evening_time="22:00",
-    )
-    fake_app.run_polling.assert_called_once_with(drop_pending_updates=True)
+    scheduler_mock.start.assert_called_once()
+    bot_mock.run.assert_called_once()
+    scheduler_mock.stop.assert_called_once()
+
+
+def test_container_run_stops_scheduler_on_exception():
+    settings = _make_settings()
+    container = Container(settings)
+
+    scheduler_mock = MagicMock()
+    bot_mock = MagicMock()
+    bot_mock.run.side_effect = RuntimeError("bot crashed")
+    container.scheduler = scheduler_mock
+    container.bot_app = bot_mock
+
+    try:
+        container.run()
+    except RuntimeError:
+        pass
+
+    scheduler_mock.stop.assert_called_once()
 
 
 def test_read_system_prompt_returns_nonempty_string():

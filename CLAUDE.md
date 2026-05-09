@@ -32,10 +32,10 @@ poetry remove <package>
 
 Single-process app with two concurrent subsystems:
 
-1. **Telegram bot** (`python-telegram-bot` async polling) — main thread
-2. **Scheduler** (`schedule` lib) — daemon background thread, fires sync+briefing at configured times
+1. **Telegram bot** (`python-telegram-bot` async polling) — main thread, managed by `TelegramBotApp`
+2. **Scheduler** (`schedule` lib) — daemon background thread managed by `Scheduler`, fires sync+briefing at configured times
 
-The two subsystems share state via globals in `garmin_coach/garmin_sync.py` (`_bot_loop`, `_bot_app`) to allow the scheduler thread to post messages via the bot's asyncio loop using `asyncio.run_coroutine_threadsafe`.
+The two subsystems share state via `TelegramBotApp.loop` (captured in `_on_startup`) which is used by `Scheduler._run_job` via `asyncio.run_coroutine_threadsafe`. No module-level globals anywhere.
 
 ### Package structure
 
@@ -44,9 +44,13 @@ All modules (except `main.py`) live in the `garmin_coach/` package. Tests are in
 ### Data flow
 
 ```
-Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach.json)
-                                                         ↓
-                                           garmin_coach/db.py → garmin_coach/coach.py (Groq/Llama) → garmin_coach/bot.py → Telegram
+Garmin Connect API → SyncService → TinyDB (data/garmin_coach.json)
+                                         ↓
+                          ContextBuilder / ToolRegistry
+                                         ↓
+                        CoachService / BriefingService (Groq/Llama)
+                                         ↓
+                       TelegramBotApp (CommandHandlers + ChatMessageHandler) → Telegram
 ```
 
 ### Module responsibilities
@@ -55,25 +59,23 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 |------|------|
 | `main.py` | Slim entry point (≤20 lines): load_dotenv → load_settings → configure_logging → Container.run() |
 | `garmin_coach/app/config.py` | `Settings` frozen dataclass + `load_settings()` — único punto que lee `os.environ` |
-| `garmin_coach/app/container.py` | `Container` — cablea dependencias; Fase 1 delega a bot legacy; Fase 5 lo reemplaza con OOP completo |
-| `garmin_coach/app/logging_setup.py` | `configure_logging(settings)` — FileHandler + StreamHandler extraído de main.py original |
-| `garmin_coach/app/legacy_bridge.py` | Pegamento temporal (Fase 1): `start_scheduler()` + `wire_mfa_to_app()`. Se elimina en Fase 4-5. |
-| `garmin_coach/prompts/coach_system.txt` | SYSTEM_PROMPT como recurso de texto plano. `prompts/__init__.read_system_prompt()` lo carga. CoachSession lo usará en Fase 3. |
-| `garmin_coach/bot.py` | All Telegram handlers; per-user `CoachSession` stored in `_sessions` dict |
-| `garmin_coach/coach.py` | `CoachSession` class (in-memory conversation history, max 40 messages); `generate_daily_briefing` for scheduled messages; usa LangChain (`langchain-groq.ChatGroq`) sobre `meta-llama/llama-4-scout-17b-16e-instruct`. Dos clientes: `chat_client` (con `bind_tools(TOOLS_SPEC)`) y `briefing_client`. La recuperación de `tool_use_failed` sigue usando `groq.BadRequestError` porque ChatGroq propaga la excepción del SDK subyacente. |
-| `garmin_coach/garmin_sync.py` | **Shim temporal — se elimina en Fase 5.** Reexporta `set_bot_app`, `set_event_loop`, `provide_mfa_code`, `sync_all` delegando a `Container.mfa_handler` y `Container.sync_service`. Cero lógica propia. |
-| `garmin_coach/db.py` | **Shim de retrocompat — se elimina en Fase 5.** Expone la misma API pública que antes pero delega internamente a las clases repo. El global `_db_instance` se mantiene para que los tests legacy con `patch("garmin_coach.db._db_instance", mock)` sigan funcionando. |
+| `garmin_coach/app/container.py` | `Container` — cablea todas las dependencias en orden; `run()` arranca Scheduler + TelegramBotApp |
+| `garmin_coach/app/scheduler.py` | `Scheduler(sync_service, briefing_service, sync_log_repo, bot_app, settings)` — hilo daemon con `start()`/`stop()`; `_morning_job`/`_evening_job` llaman sync+briefing+send |
+| `garmin_coach/app/logging_setup.py` | `configure_logging(settings)` — FileHandler + StreamHandler |
+| `garmin_coach/prompts/coach_system.txt` | SYSTEM_PROMPT como recurso de texto plano. `prompts/__init__.read_system_prompt()` lo carga. |
+| `garmin_coach/infrastructure/telegram/formatter.py` | `MessageFormatter` — `to_html(text)` (markdown→HTML, escape, strip headers), `chunk(text, max_len)` |
+| `garmin_coach/infrastructure/telegram/auth.py` | `Authorizer(allowed_user_id)` — `is_authorized(update)`, `require_auth(handler)` decorator |
+| `garmin_coach/infrastructure/telegram/bot_app.py` | `TelegramBotApp` — `build()` registra handlers; `_on_startup` captura asyncio loop + inyecta notifier en MFAHandler; `run()` arranca polling; `send_to_user(text)` para briefings programados |
+| `garmin_coach/infrastructure/telegram/handlers/commands.py` | `CommandHandlers` — un método async por comando (/start, /sync, /status, /briefing, /reset, /resetsession, /mfa, /memoria) |
+| `garmin_coach/infrastructure/telegram/handlers/chat.py` | `ChatMessageHandler` — `handle(update, context)` → coach_service.chat → formatter → reply |
 | `garmin_coach/infrastructure/garmin/mfa_handler.py` | `MFAHandler` — encapsula `threading.Event` + código MFA; `provide_code()`, `wait_for_code(timeout)`, `notify_user(msg)`, `set_notifier(fn)`, `clear()`. Cero globales. |
 | `garmin_coach/infrastructure/garmin/client.py` | `GarminClient(settings, mfa_handler)` — auth con sesión persistida; `authenticate()` lazy + cache; `reset()`. |
 | `garmin_coach/infrastructure/garmin/data_fetcher.py` | `GarminDataFetcher(garmin)` — un método por endpoint (activities/sleep/hrv/body_battery/training_status/training_readiness/respiration/spo2/stress/fitness_metrics/race_predictions/lactate_threshold/endurance_score). Pure fetch, sin upserts. |
 | `garmin_coach/services/sync_service.py` | `SyncService(garmin_client, fetcher_factory, repositories, sync_log_repo, settings)` — `run() -> SyncSummary`; orquesta auth→fetch→merge→upsert→purge→log. `SyncSummary` frozen dataclass con contadores + `as_dict()`. |
 | `garmin_coach/services/sync_helpers.py` | Funciones puras: `daterange(start, end)`, `compute_sync_window(repos, default_days)`, `merge_activity_details(activities, detail_fetcher)`. |
-| `garmin_coach/context_builder.py` | `slim_*` projections + `aggregate_series` + `build_context` to compact TinyDB records before sending to Groq (avoids `context_length_exceeded`) |
-| `garmin_coach/coach_tools.py` | Function-calling tools (find_activity, get_recent_activities, get_*_window, get_fitness_snapshot, search_memory) + `dispatch_tool_call`. Used by `CoachSession.chat` tool loop. |
-| `garmin_coach/domain/activity.py` | `ActivityType(StrEnum)` con `is_run()`/`is_distance_based()`; `Activity` frozen dataclass; `RUN_TYPES`/`NON_DISTANCE_TYPES` frozensets para retrocompat con context_builder/coach_tools |
-| `garmin_coach/domain/wellness.py` | `Sleep`, `HRV`, `BodyBattery`, `TrainingReadiness`, `TrainingStatus`, `Respiration`, `SPO2`, `Stress` — frozen dataclasses con `from_dict`/`as_dict` |
+| `garmin_coach/domain/activity.py` | `ActivityType(StrEnum)` con `is_run()`/`is_distance_based()`; `Activity` frozen dataclass; `RUN_TYPES`/`NON_DISTANCE_TYPES` frozensets |
+| `garmin_coach/domain/wellness.py` | `Sleep`, `HRV`, `BodyBattery`, `TrainingReadiness`, `TrainingStatus`, `Respiration`, `SPO2`, `Stress` — frozen dataclasses |
 | `garmin_coach/domain/fitness.py` | `FitnessMetrics`, `RacePredictions`, `LactateThreshold`, `EnduranceScore`, `PersonalRecord` frozen dataclasses |
-| `garmin_coach/domain/session.py` | Reservado para Fase 3 (ChatMessage, ConversationHistory) |
 | `garmin_coach/infrastructure/db/tinydb_factory.py` | `TinyDBFactory(db_path)` — lazy singleton, un único punto de creación de TinyDB |
 | `garmin_coach/infrastructure/db/base_repository.py` | `BaseRepository` — `upsert`, `upsert_many`, `insert`, `find_by_date_range`, `delete_older_than`, `latest`, `count`, `is_empty` |
 | `garmin_coach/infrastructure/db/activity_repository.py` | `ActivityRepository` — `find_runs_in_window`, `find_by_weekday`, `find_by_min_distance_km`, `find_by_type`, `compute_personal_records`, `latest_date` |
@@ -91,7 +93,7 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 
 ### MFA handling
 
-Garmin Connect sometimes requires MFA. Flow: `GarminClient.authenticate()` passes `prompt_mfa` callback to `Garmin()`; callback calls `MFAHandler.notify_user()` + `MFAHandler.wait_for_code()` (blocks up to 300s). Bot's `/mfa <code>` handler calls `provide_mfa_code()` → `MFAHandler.provide_code()` unblocks the wait. In Fase 5 the loop capture moves to `TelegramBotApp._on_startup`; currently wired via the shim in `garmin_sync.py`.
+Garmin Connect sometimes requires MFA. Flow: `GarminClient.authenticate()` passes `prompt_mfa` callback to `Garmin()`; callback calls `MFAHandler.notify_user()` + `MFAHandler.wait_for_code()` (blocks up to 300s). Bot's `/mfa <code>` handler calls `MFAHandler.provide_code()` which unblocks the wait. The notifier callable is injected in `TelegramBotApp._on_startup` via `mfa_handler.set_notifier(fn)` — no globals involved.
 
 ### Data persistence
 
@@ -225,6 +227,21 @@ All specs implemented. See `docs/implementations/` for technical details.
 - Tests legacy `tests/test_garmin_sync.py` eliminados (15); reemplazados por 66 tests nuevos en `tests/infrastructure/garmin/` y `tests/services/`.
 - Race condition en `test_authenticate_mfa_flow` resuelta con `threading.Event` de sincronización entre hilo proveedor y el que llama `wait_for_code`.
 - Suite: 574 passed, 95.50% coverage. Detalle: `docs/implementations/refactor_oop_phase_4.md`.
+
+## Implemented: Refactor OOP Fase 5 — Telegram OOP + Scheduler + cleanup final
+
+- `infrastructure/telegram/formatter.py`: `MessageFormatter` — `to_html()` (strip headers, escape HTML, `**x**`→`<b>x</b>`), `chunk(text, max_len=4000)`.
+- `infrastructure/telegram/auth.py`: `Authorizer(allowed_user_id)` — `is_authorized(update)`, `require_auth(handler)` decorator.
+- `infrastructure/telegram/bot_app.py`: `TelegramBotApp` — `build()` registra 9 handlers; `_on_startup` captura asyncio loop e inyecta notifier en `MFAHandler`; `run()` polling; `send_to_user(text)` para Scheduler.
+- `infrastructure/telegram/handlers/commands.py`: `CommandHandlers(coach_service, briefing_service, sync_service, mfa_handler, memory_repo, sync_log_repo, context_builder, formatter, authorizer, garmin_client)` — 8 métodos async.
+- `infrastructure/telegram/handlers/chat.py`: `ChatMessageHandler(coach_service, formatter, authorizer)` — `handle(update, context)`.
+- `app/scheduler.py`: `Scheduler(sync_service, briefing_service, sync_log_repo, bot_app, settings)` — hilo daemon; `start()`/`stop()`; `_run_job(moment)` llama sync+briefing+`bot_app.send_to_user` vía `asyncio.run_coroutine_threadsafe(bot_app.loop)`.
+- `app/container.py`: reescrito completo; `run()` hace `scheduler.start()` + `bot_app.run()` + `scheduler.stop()` en finally. Cero delegación a legacy_bridge.
+- **Borrados**: `bot.py`, `coach.py`, `coach_tools.py`, `context_builder.py`, `db.py`, `garmin_sync.py`, `app/legacy_bridge.py`, `tests/test_bot.py`, `tests/test_coach.py`, `tests/test_coach_tools.py`, `tests/test_context_builder.py`, `tests/test_db.py`.
+- **Tests nuevos** (70): `tests/infrastructure/telegram/test_formatter.py` (17), `test_auth.py` (7), `test_commands.py` (24), `test_chat_handler.py` (6+), `test_bot_app.py` (8), `tests/app/test_scheduler.py` (10), `test_container.py` (actualizado, 5).
+- **SOLID validado**: cero globales mutables fuera de Container; cero `os.getenv` fuera de `app/config.py`; `TinyDB(`/`ChatGroq(`/`Garmin(` sólo en sus factories.
+- Suite: 459 passed, 94.54% coverage. pyproject.toml omit limpiado: sólo `main.py` y `tests/*`.
+- Detalle: `docs/implementations/refactor_oop_phase_5.md`.
 
 ## Implemented: smart sync window + purge (`garmin_coach/db.py`, `garmin_coach/garmin_sync.py`)
 
