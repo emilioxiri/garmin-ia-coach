@@ -1,9 +1,7 @@
 """Unit tests for garmin_sync.py — all functions."""
 
-import pytest
 from datetime import date, timedelta
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from tinydb import TinyDB
 from tinydb.storages import MemoryStorage
 
@@ -24,6 +22,7 @@ def make_mock_client(activities=None):
 
 # ── date window ───────────────────────────────────────────────────────────────
 
+
 def test_sync_uses_30_days_when_db_empty():
     from garmin_coach.garmin_sync import sync_all
 
@@ -39,7 +38,9 @@ def test_sync_uses_30_days_when_db_empty():
 
     expected_start = (date.today() - timedelta(days=30)).isoformat()
     expected_end = date.today().isoformat()
-    mock_client.get_activities_by_date.assert_called_once_with(expected_start, expected_end)
+    mock_client.get_activities_by_date.assert_called_once_with(
+        expected_start, expected_end
+    )
 
 
 def test_sync_uses_last_db_date_when_not_empty():
@@ -91,6 +92,7 @@ def test_sync_calls_purge_before_fetching():
 
 
 # ── activity storage ──────────────────────────────────────────────────────────
+
 
 def test_sync_stores_all_activity_fields_from_api():
     from garmin_coach.garmin_sync import sync_all
@@ -189,6 +191,7 @@ def test_sync_continues_when_activity_details_fail():
 
 
 # ── summary ───────────────────────────────────────────────────────────────────
+
 
 def test_sync_summary_includes_purged():
     from garmin_coach.garmin_sync import sync_all
@@ -289,6 +292,7 @@ def test_sync_stores_body_battery_records():
 
 # ── get_garmin_client ─────────────────────────────────────────────────────────
 
+
 def test_get_garmin_client_reuses_session_when_exists(tmp_path):
     import garmin_coach.garmin_sync as garmin_sync
 
@@ -341,13 +345,14 @@ def test_get_garmin_client_falls_back_to_full_login_when_session_expired(tmp_pat
         patch("garmin_coach.garmin_sync.Garmin", return_value=mock_client),
         patch("garmin_coach.garmin_sync.SESSION_PATH", session_path),
     ):
-        result = garmin_sync.get_garmin_client("email", "pass")
+        garmin_sync.get_garmin_client("email", "pass")
 
     assert mock_client.login.call_count == 2
     assert not session_path.exists()
 
 
 # ── module-level state setters ────────────────────────────────────────────────
+
 
 def test_set_bot_app_updates_global():
     import garmin_coach.garmin_sync as garmin_sync

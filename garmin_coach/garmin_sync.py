@@ -74,6 +74,7 @@ def _prompt_mfa() -> str:
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
+
 def get_garmin_client(email: str, password: str) -> Garmin:
     """
     Devuelve un cliente autenticado de Garmin Connect.
@@ -88,7 +89,9 @@ def get_garmin_client(email: str, password: str) -> Garmin:
             logger.info("✅ Sesión de Garmin reutilizada desde disco")
             return client
         except Exception as e:
-            logger.warning(f"⚠️  Sesión expirada o inválida, haciendo login completo: {e}")
+            logger.warning(
+                f"⚠️  Sesión expirada o inválida, haciendo login completo: {e}"
+            )
             SESSION_PATH.unlink(missing_ok=True)
 
     try:
@@ -127,23 +130,33 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
         logger.info(f"📬 BD no vacía — sincronizando desde {start} (último registro)")
 
     summary = {
-        "activities": 0, "sleep": 0, "hrv": 0, "body_battery": 0,
-        "training_status": 0, "training_readiness": 0, "respiration": 0, "spo2": 0, "stress": 0,
+        "activities": 0,
+        "sleep": 0,
+        "hrv": 0,
+        "body_battery": 0,
+        "training_status": 0,
+        "training_readiness": 0,
+        "respiration": 0,
+        "spo2": 0,
+        "stress": 0,
         "purged": purged,
     }
 
     # ── Actividades ────────────────────────────────────────────────────
     try:
-        activities = client.get_activities_by_date(
-            start.isoformat(), today.isoformat()
-        )
+        activities = client.get_activities_by_date(start.isoformat(), today.isoformat())
         act_table = db.table("activities")
         from tinydb import Query
+
         Act = Query()
         for act in activities:
             act_id = str(act.get("activityId", ""))
             # Store full summary dict; try to merge in detailed metrics
-            record = {**act, "activityId": act_id, "synced_at": datetime.now(timezone.utc).isoformat()}
+            record = {
+                **act,
+                "activityId": act_id,
+                "synced_at": datetime.now(timezone.utc).isoformat(),
+            }
             try:
                 details = client.get_activity(act_id)
                 for key, value in details.items():
@@ -153,7 +166,9 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
                     if value is not None:
                         record[key] = value
             except Exception as detail_err:
-                logger.debug(f"No se pudieron obtener detalles de actividad {act_id}: {detail_err}")
+                logger.debug(
+                    f"No se pudieron obtener detalles de actividad {act_id}: {detail_err}"
+                )
             try:
                 splits = client.get_activity_splits(act_id)
                 record["splits"] = splits.get("lapDTOs", [])
@@ -177,6 +192,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     try:
         sleep_table = db.table("sleep")
         from tinydb import Query
+
         Sleep = Query()
         current = start
         while current <= today:
@@ -192,7 +208,9 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
                         "light_s": daily.get("lightSleepSeconds"),
                         "rem_s": daily.get("remSleepSeconds"),
                         "awake_s": daily.get("awakeSleepSeconds"),
-                        "score": daily.get("sleepScores", {}).get("overall", {}).get("value"),
+                        "score": daily.get("sleepScores", {})
+                        .get("overall", {})
+                        .get("value"),
                         "restingHR": daily.get("restingHeartRate"),
                         "synced_at": datetime.now(timezone.utc).isoformat(),
                     }
@@ -212,6 +230,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     try:
         hrv_table = db.table("hrv")
         from tinydb import Query
+
         HRV = Query()
         current = start
         while current <= today:
@@ -245,6 +264,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     try:
         bb_table = db.table("body_battery")
         from tinydb import Query
+
         BB = Query()
         current = start
         while current <= today:
@@ -275,19 +295,54 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
 
     # ── Daily wellness metrics ─────────────────────────────────────────────
     _DAILY_METRICS = [
-        ("training_status",    client.get_training_status,
-         lambda r: r.get("trainingStatusDTO") or (r if r else None)),
-        ("training_readiness", client.get_training_readiness,
-         lambda r: r.get("trainingReadinessDTO") or (r if r else None)),
-        ("respiration",        client.get_respiration_data,
-         lambda r: {k: r[k] for k in ("avgWakingRespirationValue", "avgSleepRespirationValue",
-                                       "highestRespirationValue", "lowestRespirationValue") if r.get(k) is not None} or None),
-        ("spo2",               client.get_spo2_data,
-         lambda r: {k: r[k] for k in ("averageSpO2", "lowestSpO2", "lastSevenDaysAvgSpO2") if r.get(k) is not None} or None),
-        ("stress",             client.get_stress_data,
-         lambda r: {k: r[k] for k in ("avgStressLevel", "maxStressLevel") if r.get(k) is not None} or None),
+        (
+            "training_status",
+            client.get_training_status,
+            lambda r: r.get("trainingStatusDTO") or (r if r else None),
+        ),
+        (
+            "training_readiness",
+            client.get_training_readiness,
+            lambda r: r.get("trainingReadinessDTO") or (r if r else None),
+        ),
+        (
+            "respiration",
+            client.get_respiration_data,
+            lambda r: {
+                k: r[k]
+                for k in (
+                    "avgWakingRespirationValue",
+                    "avgSleepRespirationValue",
+                    "highestRespirationValue",
+                    "lowestRespirationValue",
+                )
+                if r.get(k) is not None
+            }
+            or None,
+        ),
+        (
+            "spo2",
+            client.get_spo2_data,
+            lambda r: {
+                k: r[k]
+                for k in ("averageSpO2", "lowestSpO2", "lastSevenDaysAvgSpO2")
+                if r.get(k) is not None
+            }
+            or None,
+        ),
+        (
+            "stress",
+            client.get_stress_data,
+            lambda r: {
+                k: r[k]
+                for k in ("avgStressLevel", "maxStressLevel")
+                if r.get(k) is not None
+            }
+            or None,
+        ),
     ]
     from tinydb import Query as _Q
+
     DQ = _Q()
     for table_name, method, extract in _DAILY_METRICS:
         table = db.table(table_name)
@@ -297,7 +352,11 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
             try:
                 data = extract(method(day_str))
                 if data:
-                    record = {"date": day_str, **data, "synced_at": datetime.now(timezone.utc).isoformat()}
+                    record = {
+                        "date": day_str,
+                        **data,
+                        "synced_at": datetime.now(timezone.utc).isoformat(),
+                    }
                     if table.search(DQ.date == day_str):
                         table.update(record, DQ.date == day_str)
                     else:
@@ -311,6 +370,7 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     # ── Fitness snapshot (today) ───────────────────────────────────────────
     today_str = today.isoformat()
     from tinydb import Query as _Q2
+
     SQ = _Q2()
 
     try:
@@ -356,8 +416,15 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
                 vo2max = acts[-1]["vO2MaxValue"]
 
         t = db.table("fitness_metrics")
-        r = {"date": today_str, "vo2max": vo2max, "maxMetrics": max_m, "synced_at": datetime.now(timezone.utc).isoformat()}
-        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        r = {
+            "date": today_str,
+            "vo2max": vo2max,
+            "maxMetrics": max_m,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+        t.update(r, SQ.date == today_str) if t.search(
+            SQ.date == today_str
+        ) else t.insert(r)
         logger.info(f"🫀 VO2max: {vo2max}")
     except Exception as e:
         logger.debug(f"No max metrics: {e}")
@@ -365,8 +432,14 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     try:
         predictions = client.get_race_predictions(start.isoformat(), today_str)
         t = db.table("race_predictions")
-        r = {"date": today_str, "predictions": predictions, "synced_at": datetime.now(timezone.utc).isoformat()}
-        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        r = {
+            "date": today_str,
+            "predictions": predictions,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+        t.update(r, SQ.date == today_str) if t.search(
+            SQ.date == today_str
+        ) else t.insert(r)
         logger.info("🏁 Race predictions actualizadas")
     except Exception as e:
         logger.debug(f"No race predictions: {e}")
@@ -374,8 +447,14 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     try:
         lt = client.get_lactate_threshold()
         t = db.table("lactate_threshold")
-        r = {"date": today_str, **lt, "synced_at": datetime.now(timezone.utc).isoformat()}
-        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        r = {
+            "date": today_str,
+            **lt,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+        t.update(r, SQ.date == today_str) if t.search(
+            SQ.date == today_str
+        ) else t.insert(r)
         logger.info("🧪 Lactate threshold actualizado")
     except Exception as e:
         logger.debug(f"No lactate threshold: {e}")
@@ -383,8 +462,14 @@ def sync_all(email: str, password: str, days: int = 30) -> dict:
     try:
         endurance = client.get_endurance_score(start.isoformat(), today_str)
         t = db.table("endurance_score")
-        r = {"date": today_str, "data": endurance, "synced_at": datetime.now(timezone.utc).isoformat()}
-        t.update(r, SQ.date == today_str) if t.search(SQ.date == today_str) else t.insert(r)
+        r = {
+            "date": today_str,
+            "data": endurance,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+        t.update(r, SQ.date == today_str) if t.search(
+            SQ.date == today_str
+        ) else t.insert(r)
         logger.info("💪 Endurance score actualizado")
     except Exception as e:
         logger.debug(f"No endurance score: {e}")

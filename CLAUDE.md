@@ -53,7 +53,12 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 
 | File | Role |
 |------|------|
-| `main.py` | Entry point; wires bot + scheduler; scheduler runs `sync_all` then `generate_daily_briefing` |
+| `main.py` | Slim entry point (≤20 lines): load_dotenv → load_settings → configure_logging → Container.run() |
+| `garmin_coach/app/config.py` | `Settings` frozen dataclass + `load_settings()` — único punto que lee `os.environ` |
+| `garmin_coach/app/container.py` | `Container` — cablea dependencias; Fase 1 delega a bot legacy; Fase 5 lo reemplaza con OOP completo |
+| `garmin_coach/app/logging_setup.py` | `configure_logging(settings)` — FileHandler + StreamHandler extraído de main.py original |
+| `garmin_coach/app/legacy_bridge.py` | Pegamento temporal (Fase 1): `start_scheduler()` + `wire_mfa_to_app()`. Se elimina en Fase 4-5. |
+| `garmin_coach/prompts/coach_system.txt` | SYSTEM_PROMPT como recurso de texto plano. `prompts/__init__.read_system_prompt()` lo carga. CoachSession lo usará en Fase 3. |
 | `garmin_coach/bot.py` | All Telegram handlers; per-user `CoachSession` stored in `_sessions` dict |
 | `garmin_coach/coach.py` | `CoachSession` class (in-memory conversation history, max 40 messages); `generate_daily_briefing` for scheduled messages; usa LangChain (`langchain-groq.ChatGroq`) sobre `meta-llama/llama-4-scout-17b-16e-instruct`. Dos clientes: `chat_client` (con `bind_tools(TOOLS_SPEC)`) y `briefing_client`. La recuperación de `tool_use_failed` sigue usando `groq.BadRequestError` porque ChatGroq propaga la excepción del SDK subyacente. |
 | `garmin_coach/garmin_sync.py` | Garmin auth with session persistence at `/data/garmin_session.json`; MFA flow via Telegram (`/mfa` command + threading.Event); `sync_all` fetches activities, sleep, HRV, body battery |
@@ -100,6 +105,18 @@ python -m pytest garmin_coach/tests/ -v
 ## Active specs
 
 All specs implemented. See `docs/implementations/` for technical details.
+
+## Implemented: Refactor OOP Fase 1 — Settings + Container + estructura de carpetas (`garmin_coach/app/`, `garmin_coach/prompts/`)
+
+- `Settings` frozen dataclass + `load_settings()` en `app/config.py` — único punto que toca `os.environ`. Lanza `RuntimeError` con lista de faltantes si falta alguna obligatoria.
+- `configure_logging(settings)` en `app/logging_setup.py` — extraído de `main.py`, crea directorio del log automáticamente.
+- `Container(settings).run()` en `app/container.py` — en Fase 1 delega a `bot.build_application()` legacy.
+- `legacy_bridge.py` — pegamento temporal con scheduler y MFA bridge; se elimina en Fase 4-5.
+- `prompts/coach_system.txt` — SYSTEM_PROMPT como recurso de texto; `read_system_prompt()` en `prompts/__init__.py`. CoachSession lo cargará en Fase 3.
+- `main.py` reescrito a ≤20 líneas: load_dotenv → load_settings → configure_logging → Container.run().
+- Deuda temporal: scheduler fuera del Container (hilo daemon en legacy_bridge) y SYSTEM_PROMPT duplicado en coach.py hasta Fase 3.
+- Tests: `tests/app/test_config.py` (7), `test_container.py` (3), `test_logging_setup.py` (2). Suite: 210 passed, 90.44% coverage.
+- Detalle: `docs/implementations/refactor_oop_phase_1.md`.
 
 ## Implemented: LLM context slimming (`garmin_coach/context_builder.py`, `garmin_coach/db.py`, `garmin_coach/coach.py`)
 

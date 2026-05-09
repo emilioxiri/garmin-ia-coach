@@ -1,4 +1,5 @@
 """Set env vars before any module-level SDK clients are instantiated."""
+
 import os
 
 os.environ.setdefault("GROQ_API_KEY", "test-key-for-testing")
