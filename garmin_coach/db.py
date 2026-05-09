@@ -213,10 +213,10 @@ def get_context_for_ai(days: int = 14) -> dict:
 
 def get_compact_context_for_ai(days: int = 7, max_activities: int = 10) -> dict:
     """Compact version of get_context_for_ai for LLM consumption."""
-    from garmin_coach.context_builder import build_context
+    from garmin_coach.services.context_builder import _compact
 
     raw = get_context_for_ai(days=days)
-    return build_context(raw, max_activities=max_activities)
+    return _compact(raw, max_activities=max_activities)
 
 
 def is_db_empty() -> bool:

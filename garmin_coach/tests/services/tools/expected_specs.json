@@ -1,0 +1,184 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "find_activity",
+      "description": "Busca actividades del atleta filtrando por día de la semana en español (lunes…domingo), fecha exacta YYYY-MM-DD, rango de distancia en km, tipo de actividad (running, cycling, padel, strength_training…) y/o solo carreras (only_runs). Úsalo cuando el atleta mencione una sesión concreta (\"la media maratón del viernes\", \"el rodaje del 5 de mayo\").",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "description": "lunes, martes, miércoles, jueves, viernes, sábado, domingo"
+          },
+          "date_iso": {
+            "type": "string",
+            "description": "Fecha exacta en formato YYYY-MM-DD"
+          },
+          "min_distance_km": {
+            "type": "number"
+          },
+          "max_distance_km": {
+            "type": "number"
+          },
+          "activity_type": {
+            "type": "string",
+            "description": "typeKey de Garmin: running, trail_running, cycling, padel, strength_training, etc."
+          },
+          "only_runs": {
+            "type": "boolean",
+            "description": "Si true, sólo carreras (running, trail_running, treadmill_running…)"
+          },
+          "days": {
+            "type": "integer",
+            "description": "Ventana hacia atrás. Default 30, max 90."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_recent_activities",
+      "description": "Devuelve actividades recientes (más nuevas primero) en una ventana de N días. Filtros opcionales por tipo o sólo carreras.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "description": "Default 7, max 90."
+          },
+          "activity_type": {
+            "type": "string"
+          },
+          "only_runs": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Máximo a devolver (cap interno 25)."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_activity_detail",
+      "description": "Devuelve la actividad con `activityId` indicado. Útil tras find_activity para confirmar métricas avanzadas.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_sleep_window",
+      "description": "Devuelve registros de sueño (total/deep/rem/light/awake en horas, score, restingHR) en los últimos `days` días.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_hrv_window",
+      "description": "Devuelve HRV diaria (lastNight, weeklyAvg, status) en los últimos `days` días.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_body_battery_window",
+      "description": "Devuelve Body Battery (max/min) diaria en los últimos `days` días.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_training_readiness_window",
+      "description": "Devuelve training readiness (score, level, feedback, sleepScore, hrvFactorPercent) en ventana.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_fitness_snapshot",
+      "description": "Snapshot agregado: VO2max running, race predictions (5K/10K/HM/M), umbral de lactato y endurance score más recientes.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_personal_records",
+      "description": "Devuelve marcas personales calculadas sobre TODA la tabla de actividades: mejor tiempo en 1K, 5K, 10K, media maratón y maratón (con tolerancia ±2-5%) y la carrera más larga registrada. Úsalo cuando el atleta pregunte por su PB, mejor marca, récord personal o tirada más larga.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_memory",
+      "description": "Busca en las notas que el atleta ha guardado con /memoria (lesiones, sensaciones, decisiones). Substring case-insensitive.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+]
