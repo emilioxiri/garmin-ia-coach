@@ -266,6 +266,27 @@ def test_chat_recovers_tool_call_from_function_tag():
     assert result == "El jueves hiciste 8.31 km."
 
 
+def test_chat_recovers_inline_json_from_tool_use_failed():
+    """Groq sometimes returns 400 with inline JSON tool call in failed_generation."""
+    failed = (
+        '[{"name": "get_recent_activities", '
+        '"parameters": {"activity_type": "running", "days": null}}]'
+    )
+    err = _bad_request(
+        {"error": {"code": "tool_use_failed", "failed_generation": failed}}
+    )
+    llm = MagicMock()
+    llm.chat.side_effect = [err, _ai("Tus últimas carreras: 5K, 8K, 10K.")]
+    llm.specs = MagicMock(return_value=[])
+    registry = _fake_registry(dispatch_result=[{"activityId": "1"}])
+    session = _session(llm=llm, registry=registry)
+    result = session.chat("¿últimas carreras?")
+    registry.dispatch.assert_called_once_with(
+        "get_recent_activities", {"activity_type": "running", "days": None}
+    )
+    assert result == "Tus últimas carreras: 5K, 8K, 10K."
+
+
 def test_chat_propagates_non_tool_use_400():
     err = _bad_request({"error": {"code": "context_length_exceeded"}})
     llm = MagicMock()

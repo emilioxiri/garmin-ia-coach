@@ -13,6 +13,61 @@ from garmin_coach.services.tools.base import Tool
 logger = logging.getLogger(__name__)
 
 
+_BOOL_TRUE = {"true", "1", "yes", "y", "si", "sí"}
+_BOOL_FALSE = {"false", "0", "no", "n"}
+
+
+def coerce_args_by_schema(args: dict, schema: dict) -> dict:
+    """Coerce raw LLM args to the JSON-schema declared types.
+
+    Llama frequently emits all params as strings (`"days": "7"`,
+    `"only_runs": "true"`) or as empty strings (`""`) for unset slots.
+    This helper:
+      - drops None and empty strings (treat as missing → default applies)
+      - converts numeric strings to int/float per schema `type`
+      - converts "true"/"false" strings to bool
+      - leaves already-typed values untouched
+      - drops values that fail conversion (default applies)
+    """
+    props = (schema or {}).get("properties") or {}
+    out: dict = {}
+    for key, value in (args or {}).items():
+        if value is None:
+            continue
+        prop_type = (props.get(key) or {}).get("type")
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                continue
+            if prop_type == "integer":
+                try:
+                    out[key] = int(float(stripped))
+                except ValueError:
+                    continue
+            elif prop_type == "number":
+                try:
+                    out[key] = float(stripped)
+                except ValueError:
+                    continue
+            elif prop_type == "boolean":
+                low = stripped.lower()
+                if low in _BOOL_TRUE:
+                    out[key] = True
+                elif low in _BOOL_FALSE:
+                    out[key] = False
+            else:
+                out[key] = value
+            continue
+        if prop_type == "integer" and isinstance(value, float):
+            out[key] = int(value)
+            continue
+        if prop_type == "number" and isinstance(value, int) and not isinstance(value, bool):
+            out[key] = float(value)
+            continue
+        out[key] = value
+    return out
+
+
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
@@ -32,7 +87,7 @@ class ToolRegistry:
         if tool is None:
             return {"error": f"unknown tool: {name}"}
         try:
-            clean_args = {k: v for k, v in (args or {}).items() if v is not None}
+            clean_args = coerce_args_by_schema(args or {}, tool.parameters)
             result = tool.handle(**clean_args)
             if result.error is not None:
                 return {"error": result.error}

@@ -122,6 +122,16 @@ class CoachSession:
                             }
                         )
                         continue
+                    inline = parse_inline_tool_calls(failed)
+                    if inline:
+                        logger.warning(
+                            "Groq tool_use_failed; recovered %d inline JSON tool call(s)",
+                            len(inline),
+                        )
+                        synthetic = self._synthesize_inline_tool_calls(inline)
+                        self.history.append(synthetic["assistant_msg"])
+                        self.history.extend(synthetic["tool_msgs"])
+                        continue
                     salvaged = salvage_tool_use_failed(exc)
                     if salvaged is None:
                         raise
