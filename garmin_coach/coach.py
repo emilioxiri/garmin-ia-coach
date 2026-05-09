@@ -1,6 +1,6 @@
 """
 coach.py
-Motor de IA: usa Groq (Llama 3.3 70B) como entrenador personal.
+Motor de IA: usa Groq (Llama 4 Scout) vía LangChain como entrenador personal.
 Mantiene historial de conversación en memoria durante la sesión.
 """
 
@@ -8,18 +8,21 @@ import json
 import logging
 import re
 
-from groq import BadRequestError, Groq
+from groq import BadRequestError
+from langchain_core.messages import AIMessage
+from langchain_groq import ChatGroq
 
 from garmin_coach.coach_tools import TOOLS_SPEC, dispatch_tool_call
 from garmin_coach.db import get_compact_context_for_ai
 
 logger = logging.getLogger(__name__)
 
-client = Groq()
-
 MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 MAX_TOOL_ITERATIONS = 5
+
+chat_client = ChatGroq(model=MODEL, max_tokens=1200).bind_tools(TOOLS_SPEC)
+briefing_client = ChatGroq(model=MODEL, max_tokens=1000)
 
 SYSTEM_PROMPT = """Eres un entrenador personal de alto rendimiento especializado en running. Tienes acceso en tiempo real a los datos fisiológicos y de entrenamiento del atleta extraídos de su dispositivo Garmin Fenix 8.
 
@@ -72,18 +75,18 @@ Formato de respuesta:
 - Para negrita usa **doble asterisco** (se convierte a HTML <b>). NUNCA uses asterisco simple `*texto*` ni almohadillas (#) ni encabezados markdown."""
 
 
-def _serialize_assistant_message(msg) -> dict:
-    """Convert a Groq assistant message (with possible tool_calls) into our history dict."""
-    out: dict = {"role": "assistant", "content": msg.content}
-    tool_calls = getattr(msg, "tool_calls", None)
+def _serialize_assistant_message(msg: AIMessage) -> dict:
+    """Convert a LangChain AIMessage (with possible tool_calls) into our history dict."""
+    out: dict = {"role": "assistant", "content": msg.content or None}
+    tool_calls = getattr(msg, "tool_calls", None) or []
     if tool_calls:
         out["tool_calls"] = [
             {
-                "id": tc.id,
+                "id": tc["id"],
                 "type": "function",
                 "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments or "{}",
+                    "name": tc["name"],
+                    "arguments": json.dumps(tc["args"], ensure_ascii=False),
                 },
             }
             for tc in tool_calls
@@ -91,17 +94,39 @@ def _serialize_assistant_message(msg) -> dict:
     return out
 
 
-def _execute_tool_calls(tool_calls) -> list[dict]:
+def _normalize_tool_calls(msg: AIMessage) -> list[dict]:
+    """Return a flat list of `{id, name, args}` from valid + invalid tool calls.
+
+    LangChain splits well-formed calls into `tool_calls` (parsed args dict) and
+    parser failures into `invalid_tool_calls` (raw arg string). We coerce both
+    into the same shape so the executor can treat them uniformly.
+    """
+    out: list[dict] = []
+    for tc in getattr(msg, "tool_calls", None) or []:
+        args = tc.get("args") if isinstance(tc.get("args"), dict) else {}
+        out.append({"id": tc["id"], "name": tc["name"], "args": args})
+    for tc in getattr(msg, "invalid_tool_calls", None) or []:
+        raw = tc.get("args")
+        if isinstance(raw, dict):
+            args = raw
+        elif isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                args = parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                args = {}
+        else:
+            args = {}
+        out.append({"id": tc.get("id"), "name": tc.get("name"), "args": args})
+    return out
+
+
+def _execute_tool_calls(tool_calls: list[dict]) -> list[dict]:
     """Run each tool call and return list of role:tool messages."""
     results: list[dict] = []
     for tc in tool_calls:
-        name = tc.function.name
-        try:
-            args = json.loads(tc.function.arguments or "{}")
-            if not isinstance(args, dict):
-                args = {}
-        except json.JSONDecodeError:
-            args = {}
+        name = tc["name"]
+        args = tc["args"] if isinstance(tc.get("args"), dict) else {}
         result = dispatch_tool_call(name, args)
         try:
             content = json.dumps(result, ensure_ascii=False, default=str)
@@ -110,7 +135,7 @@ def _execute_tool_calls(tool_calls) -> list[dict]:
         results.append(
             {
                 "role": "tool",
-                "tool_call_id": tc.id,
+                "tool_call_id": tc["id"],
                 "name": name,
                 "content": content,
             }
@@ -167,7 +192,7 @@ def _parse_function_tag(text: str) -> tuple[str, dict] | None:
 def _salvage_tool_use_failed(error: BadRequestError) -> str | None:
     """Recover plain-text answer from Groq's `tool_use_failed` 400 errors.
 
-    Llama 3.3 sometimes emits a normal answer followed by a malformed
+    Llama sometimes emits a normal answer followed by a malformed
     `<function=...>` payload. We strip the bogus function tag and return the
     prose so the user gets the answer instead of a 400. Returns None when
     no usable text remains (caller may then try to recover the tool call).
@@ -203,7 +228,7 @@ class CoachSession:
         """
         Envía un mensaje al coach y devuelve la respuesta.
         Si include_garmin_data=True, inyecta el contexto de Garmin en el primer mensaje.
-        El bucle ejecuta tool_calls de Groq hasta MAX_TOOL_ITERATIONS antes de cerrar.
+        El bucle ejecuta tool_calls hasta MAX_TOOL_ITERATIONS antes de cerrar.
         """
         if not self.history and include_garmin_data:
             context = get_compact_context_for_ai(days=7)
@@ -221,13 +246,10 @@ class CoachSession:
             assistant_message = ""
             for _ in range(MAX_TOOL_ITERATIONS):
                 try:
-                    response = client.chat.completions.create(
-                        model=MODEL,
-                        max_tokens=1200,
-                        tools=TOOLS_SPEC,
-                        messages=[{"role": "system", "content": SYSTEM_PROMPT}]
-                        + self.history,
-                    )
+                    messages = [
+                        {"role": "system", "content": SYSTEM_PROMPT}
+                    ] + self.history
+                    response = chat_client.invoke(messages)
                 except BadRequestError as e:
                     failed = _failed_generation_payload(e)
                     if failed is None:
@@ -283,11 +305,10 @@ class CoachSession:
                     assistant_message = salvaged
                     break
 
-                msg = response.choices[0].message
-                self.history.append(_serialize_assistant_message(msg))
-                assistant_message = msg.content or ""
+                self.history.append(_serialize_assistant_message(response))
+                assistant_message = response.content or ""
 
-                tool_calls = getattr(msg, "tool_calls", None)
+                tool_calls = _normalize_tool_calls(response)
                 if not tool_calls:
                     break
                 self.history.extend(_execute_tool_calls(tool_calls))
@@ -298,7 +319,7 @@ class CoachSession:
             return assistant_message
 
         except Exception as e:
-            logger.error(f"Error en Groq API: {e}")
+            logger.error(f"Error en LLM: {e}")
             return f"❌ Error al conectar con el coach: {str(e)}"
 
     def reset(self):
@@ -330,15 +351,13 @@ def generate_daily_briefing(moment: str = "morning") -> str:
         )
 
     try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=1000,
-            messages=[
+        response = briefing_client.invoke(
+            [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
-            ],
+            ]
         )
-        return response.choices[0].message.content
+        return response.content
     except Exception as e:
         logger.error(f"Error generando briefing: {e}")
         return f"❌ No se pudo generar el briefing: {str(e)}"

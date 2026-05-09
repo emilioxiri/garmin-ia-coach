@@ -3,45 +3,51 @@
 from unittest.mock import MagicMock, patch
 
 from groq import BadRequestError
+from langchain_core.messages import AIMessage
 
 
-def make_mock_groq_response(content="Respuesta del coach"):
-    response = MagicMock()
-    response.choices[0].message.content = content
-    response.choices[0].message.tool_calls = None
-    return response
+def make_ai_message(
+    content="Respuesta del coach", tool_calls=None, invalid_tool_calls=None
+):
+    """Build an AIMessage matching LangChain's tool_call shape."""
+    return AIMessage(
+        content=content or "",
+        tool_calls=tool_calls or [],
+        invalid_tool_calls=invalid_tool_calls or [],
+    )
 
 
-def make_mock_groq(content="Respuesta del coach"):
+def make_mock_chat_client(content="Respuesta del coach"):
+    """Mock for `chat_client` whose invoke returns a single AIMessage."""
     mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = make_mock_groq_response(content)
+    mock_client.invoke.return_value = make_ai_message(content)
     return mock_client
 
 
-def make_tool_call(call_id, name, arguments_json):
-    tc = MagicMock()
-    tc.id = call_id
-    tc.function.name = name
-    tc.function.arguments = arguments_json
-    return tc
-
-
-def make_groq_with_responses(*responses):
-    """Build a mock client whose chat.completions.create iterates through `responses`."""
+def make_mock_briefing_client(content="Respuesta del coach"):
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = list(responses)
+    mock_client.invoke.return_value = make_ai_message(content)
+    return mock_client
+
+
+def make_tool_call(call_id, name, args):
+    """Build a LangChain-style tool_call dict (args already parsed to dict)."""
+    return {"id": call_id, "name": name, "args": args, "type": "tool_call"}
+
+
+def make_chat_with_responses(*responses):
+    """Build a mock chat_client whose invoke iterates through `responses`."""
+    mock_client = MagicMock()
+    mock_client.invoke.side_effect = list(responses)
     return mock_client
 
 
 def tool_response(*tool_calls, content=None):
-    response = MagicMock()
-    response.choices[0].message.content = content
-    response.choices[0].message.tool_calls = list(tool_calls)
-    return response
+    return make_ai_message(content=content or "", tool_calls=list(tool_calls))
 
 
 def final_response(content="Final"):
-    return make_mock_groq_response(content)
+    return make_ai_message(content)
 
 
 EMPTY_CONTEXT = {
@@ -60,9 +66,9 @@ EMPTY_CONTEXT = {
 def test_chat_returns_ai_response():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq("Entrena suave hoy.")
+    mock_client = make_mock_chat_client("Entrena suave hoy.")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -76,9 +82,9 @@ def test_chat_returns_ai_response():
 def test_chat_injects_garmin_data_on_first_message():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq()
+    mock_client = make_mock_chat_client()
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ) as mock_ctx,
@@ -87,9 +93,8 @@ def test_chat_injects_garmin_data_on_first_message():
         session.chat("Hola")
 
     mock_ctx.assert_called_once_with(days=7)
-    sent_content = mock_groq.chat.completions.create.call_args[1]["messages"][-1][
-        "content"
-    ]
+    sent_messages = mock_client.invoke.call_args[0][0]
+    sent_content = sent_messages[-1]["content"]
     assert "DATOS GARMIN" in sent_content
     assert "Hola" in sent_content
 
@@ -97,9 +102,9 @@ def test_chat_injects_garmin_data_on_first_message():
 def test_chat_no_garmin_data_on_subsequent_messages():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq()
+    mock_client = make_mock_chat_client()
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ) as mock_ctx,
@@ -109,9 +114,7 @@ def test_chat_no_garmin_data_on_subsequent_messages():
         session.chat("segundo mensaje")
 
     assert mock_ctx.call_count == 1
-    second_call_messages = mock_groq.chat.completions.create.call_args_list[1][1][
-        "messages"
-    ]
+    second_call_messages = mock_client.invoke.call_args_list[1][0][0]
     last_user_msg = [m for m in second_call_messages if m["role"] == "user"][-1][
         "content"
     ]
@@ -122,9 +125,9 @@ def test_chat_no_garmin_data_on_subsequent_messages():
 def test_chat_no_garmin_when_include_false():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq()
+    mock_client = make_mock_chat_client()
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ) as mock_ctx,
@@ -133,18 +136,17 @@ def test_chat_no_garmin_when_include_false():
         session.chat("mensaje sin datos", include_garmin_data=False)
 
     mock_ctx.assert_not_called()
-    sent_content = mock_groq.chat.completions.create.call_args[1]["messages"][-1][
-        "content"
-    ]
+    sent_messages = mock_client.invoke.call_args[0][0]
+    sent_content = sent_messages[-1]["content"]
     assert "DATOS GARMIN" not in sent_content
 
 
 def test_chat_appends_to_history():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq("respuesta")
+    mock_client = make_mock_chat_client("respuesta")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -161,21 +163,19 @@ def test_chat_appends_to_history():
 def test_chat_history_trimmed_when_over_40():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq("ok")
+    mock_client = make_mock_chat_client("ok")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
     ):
         session = CoachSession()
-        # Pre-fill history to 40 entries (20 exchanges)
         for i in range(20):
             session.history.append({"role": "user", "content": f"msg{i}"})
             session.history.append({"role": "assistant", "content": f"resp{i}"})
         assert len(session.history) == 40
 
-        # One more exchange pushes it to 42, then trimmed to 40
         session.chat("nuevo mensaje")
 
     assert len(session.history) == 40
@@ -184,10 +184,10 @@ def test_chat_history_trimmed_when_over_40():
 def test_chat_error_returns_error_string():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = MagicMock()
-    mock_groq.chat.completions.create.side_effect = Exception("conexión fallida")
+    mock_client = MagicMock()
+    mock_client.invoke.side_effect = Exception("conexión fallida")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -205,9 +205,9 @@ def test_chat_error_returns_error_string():
 def test_reset_clears_history():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq()
+    mock_client = make_mock_chat_client()
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -223,9 +223,9 @@ def test_reset_clears_history():
 def test_reset_allows_garmin_injection_again():
     from garmin_coach.coach import CoachSession
 
-    mock_groq = make_mock_groq()
+    mock_client = make_mock_chat_client()
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ) as mock_ctx,
@@ -244,41 +244,43 @@ def test_reset_allows_garmin_injection_again():
 def test_briefing_morning_uses_buenos_dias_prompt():
     from garmin_coach.coach import generate_daily_briefing
 
-    mock_groq = make_mock_groq("Briefing de mañana")
+    mock_client = make_mock_briefing_client("Briefing de mañana")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.briefing_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
     ):
         generate_daily_briefing("morning")
 
-    prompt = mock_groq.chat.completions.create.call_args[1]["messages"][1]["content"]
+    sent_messages = mock_client.invoke.call_args[0][0]
+    prompt = sent_messages[1]["content"]
     assert "Buenos días" in prompt
 
 
 def test_briefing_evening_uses_buenas_noches_prompt():
     from garmin_coach.coach import generate_daily_briefing
 
-    mock_groq = make_mock_groq("Briefing de noche")
+    mock_client = make_mock_briefing_client("Briefing de noche")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.briefing_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
     ):
         generate_daily_briefing("evening")
 
-    prompt = mock_groq.chat.completions.create.call_args[1]["messages"][1]["content"]
+    sent_messages = mock_client.invoke.call_args[0][0]
+    prompt = sent_messages[1]["content"]
     assert "Buenas noches" in prompt
 
 
 def test_briefing_fetches_7_days_context():
     from garmin_coach.coach import generate_daily_briefing
 
-    mock_groq = make_mock_groq()
+    mock_client = make_mock_briefing_client()
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.briefing_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ) as mock_ctx,
@@ -291,9 +293,9 @@ def test_briefing_fetches_7_days_context():
 def test_briefing_returns_ai_response():
     from garmin_coach.coach import generate_daily_briefing
 
-    mock_groq = make_mock_groq("Gran día para entrenar.")
+    mock_client = make_mock_briefing_client("Gran día para entrenar.")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.briefing_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -306,10 +308,10 @@ def test_briefing_returns_ai_response():
 def test_briefing_error_returns_error_string():
     from garmin_coach.coach import generate_daily_briefing
 
-    mock_groq = MagicMock()
-    mock_groq.chat.completions.create.side_effect = Exception("timeout")
+    mock_client = MagicMock()
+    mock_client.invoke.side_effect = Exception("timeout")
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.briefing_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -327,9 +329,9 @@ def test_briefing_includes_garmin_data_in_prompt():
         **EMPTY_CONTEXT,
         "activities": [{"activityId": "1", "startTimeLocal": "2024-01-01 08:00:00"}],
     }
-    mock_groq = make_mock_groq()
+    mock_client = make_mock_briefing_client()
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.briefing_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai",
             return_value=context_with_data,
@@ -337,7 +339,8 @@ def test_briefing_includes_garmin_data_in_prompt():
     ):
         generate_daily_briefing("morning")
 
-    prompt = mock_groq.chat.completions.create.call_args[1]["messages"][1]["content"]
+    sent_messages = mock_client.invoke.call_args[0][0]
+    prompt = sent_messages[1]["content"]
     assert "DATOS" in prompt
     assert "activityId" in prompt
 
@@ -348,14 +351,14 @@ def test_briefing_includes_garmin_data_in_prompt():
 def test_chat_executes_tool_call_then_returns_final():
     from garmin_coach.coach import CoachSession
 
-    tc = make_tool_call("call_1", "find_activity", '{"weekday": "viernes"}')
-    mock_groq = make_groq_with_responses(
+    tc = make_tool_call("call_1", "find_activity", {"weekday": "viernes"})
+    mock_client = make_chat_with_responses(
         tool_response(tc),
         final_response("Tu media maratón fue el viernes."),
     )
 
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -369,36 +372,20 @@ def test_chat_executes_tool_call_then_returns_final():
 
     mock_dispatch.assert_called_once_with("find_activity", {"weekday": "viernes"})
     assert result == "Tu media maratón fue el viernes."
-    assert mock_groq.chat.completions.create.call_count == 2
-
-
-def test_chat_passes_tools_spec_to_groq():
-    from garmin_coach.coach import CoachSession, TOOLS_SPEC
-
-    mock_groq = make_mock_groq("ok")
-    with (
-        patch("garmin_coach.coach.client", mock_groq),
-        patch(
-            "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
-        ),
-    ):
-        CoachSession().chat("hola")
-
-    kwargs = mock_groq.chat.completions.create.call_args[1]
-    assert kwargs["tools"] is TOOLS_SPEC
+    assert mock_client.invoke.call_count == 2
 
 
 def test_chat_appends_tool_messages_to_history():
     from garmin_coach.coach import CoachSession
 
-    tc = make_tool_call("call_99", "get_fitness_snapshot", "{}")
-    mock_groq = make_groq_with_responses(
+    tc = make_tool_call("call_99", "get_fitness_snapshot", {})
+    mock_client = make_chat_with_responses(
         tool_response(tc),
         final_response("VO2max 52"),
     )
 
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -418,17 +405,22 @@ def test_chat_appends_tool_messages_to_history():
     assert "vo2max_running" in tool_msg["content"]
 
 
-def test_chat_handles_invalid_tool_arguments_json():
+def test_chat_handles_invalid_tool_arguments_via_invalid_tool_calls():
+    """LangChain routes parser failures to invalid_tool_calls (raw string args)."""
     from garmin_coach.coach import CoachSession
 
-    tc = make_tool_call("call_2", "find_activity", "not json {{{")
-    mock_groq = make_groq_with_responses(
-        tool_response(tc),
-        final_response("Listo"),
-    )
+    bad_call = {
+        "id": "call_2",
+        "name": "find_activity",
+        "args": "not json {{{",
+        "error": "JSONDecodeError",
+        "type": "invalid_tool_call",
+    }
+    first = make_ai_message(content="", invalid_tool_calls=[bad_call])
+    mock_client = make_chat_with_responses(first, final_response("Listo"))
 
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -438,19 +430,18 @@ def test_chat_handles_invalid_tool_arguments_json():
     ):
         CoachSession().chat("?")
 
-    # Bad JSON falls back to {}
     mock_dispatch.assert_called_once_with("find_activity", {})
 
 
 def test_chat_stops_after_max_tool_iterations(caplog):
     from garmin_coach.coach import CoachSession, MAX_TOOL_ITERATIONS
 
-    tc = make_tool_call("call_x", "find_activity", "{}")
+    tc = make_tool_call("call_x", "find_activity", {})
     looping_responses = [tool_response(tc) for _ in range(MAX_TOOL_ITERATIONS)]
-    mock_groq = make_groq_with_responses(*looping_responses)
+    mock_client = make_chat_with_responses(*looping_responses)
 
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -460,21 +451,21 @@ def test_chat_stops_after_max_tool_iterations(caplog):
         result = CoachSession().chat("loop")
 
     assert result == ""
-    assert mock_groq.chat.completions.create.call_count == MAX_TOOL_ITERATIONS
+    assert mock_client.invoke.call_count == MAX_TOOL_ITERATIONS
     assert any("MAX_TOOL_ITERATIONS" in rec.message for rec in caplog.records)
 
 
 def test_chat_serializes_assistant_tool_calls_in_history():
     from garmin_coach.coach import CoachSession
 
-    tc = make_tool_call("call_7", "get_sleep_window", '{"days": 14}')
-    mock_groq = make_groq_with_responses(
+    tc = make_tool_call("call_7", "get_sleep_window", {"days": 14})
+    mock_client = make_chat_with_responses(
         tool_response(tc),
         final_response("Sueño analizado"),
     )
 
     with (
-        patch("garmin_coach.coach.client", mock_groq),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -494,23 +485,6 @@ def test_chat_serializes_assistant_tool_calls_in_history():
     )
 
 
-def test_chat_does_not_pass_tools_to_briefing():
-    """generate_daily_briefing keeps the dump-only path; no tool loop there."""
-    from garmin_coach.coach import generate_daily_briefing
-
-    mock_groq = make_mock_groq("brief")
-    with (
-        patch("garmin_coach.coach.client", mock_groq),
-        patch(
-            "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
-        ),
-    ):
-        generate_daily_briefing("morning")
-
-    kwargs = mock_groq.chat.completions.create.call_args[1]
-    assert "tools" not in kwargs
-
-
 # ── _trim_history ─────────────────────────────────────────────────────────────
 
 
@@ -522,9 +496,7 @@ def test_trim_history_drops_orphan_tool_messages():
         {"role": "tool", "tool_call_id": "x", "name": "y", "content": "{}"},
         {"role": "assistant", "content": "final"},
     ]
-    # Force trim to small max so head of trimmed window starts mid tool exchange
     trimmed = _trim_history(hist, max_len=2)
-    # First message must not be an orphan tool entry
     assert trimmed[0]["role"] != "tool"
 
 
@@ -653,9 +625,9 @@ def test_chat_recovers_from_tool_use_failed_text_only():
         }
     )
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = err
+    mock_client.invoke.side_effect = err
     with (
-        patch("garmin_coach.coach.client", mock_client),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -677,12 +649,12 @@ def test_chat_recovers_tool_call_from_function_tag():
         }
     )
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = [
+    mock_client.invoke.side_effect = [
         err,
-        make_mock_groq_response("El jueves hiciste 8.31 km."),
+        make_ai_message("El jueves hiciste 8.31 km."),
     ]
     with (
-        patch("garmin_coach.coach.client", mock_client),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -713,12 +685,12 @@ def test_chat_recovers_tool_call_no_parens_form():
         }
     )
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = [
+    mock_client.invoke.side_effect = [
         err,
-        make_mock_groq_response("VO2max 52"),
+        make_ai_message("VO2max 52"),
     ]
     with (
-        patch("garmin_coach.coach.client", mock_client),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
@@ -738,9 +710,9 @@ def test_chat_propagates_non_tool_use_400():
 
     err = _make_bad_request({"error": {"code": "context_length_exceeded"}})
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = err
+    mock_client.invoke.side_effect = err
     with (
-        patch("garmin_coach.coach.client", mock_client),
+        patch("garmin_coach.coach.chat_client", mock_client),
         patch(
             "garmin_coach.coach.get_compact_context_for_ai", return_value=EMPTY_CONTEXT
         ),
