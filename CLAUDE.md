@@ -62,9 +62,20 @@ Garmin Connect API → garmin_coach/garmin_sync.py → TinyDB (data/garmin_coach
 | `garmin_coach/bot.py` | All Telegram handlers; per-user `CoachSession` stored in `_sessions` dict |
 | `garmin_coach/coach.py` | `CoachSession` class (in-memory conversation history, max 40 messages); `generate_daily_briefing` for scheduled messages; usa LangChain (`langchain-groq.ChatGroq`) sobre `meta-llama/llama-4-scout-17b-16e-instruct`. Dos clientes: `chat_client` (con `bind_tools(TOOLS_SPEC)`) y `briefing_client`. La recuperación de `tool_use_failed` sigue usando `groq.BadRequestError` porque ChatGroq propaga la excepción del SDK subyacente. |
 | `garmin_coach/garmin_sync.py` | Garmin auth with session persistence at `/data/garmin_session.json`; MFA flow via Telegram (`/mfa` command + threading.Event); `sync_all` fetches activities, sleep, HRV, body battery |
-| `garmin_coach/db.py` | TinyDB singleton; tables: `activities`, `sleep`, `hrv`, `body_battery`, `memory`, `sync_log`; `get_context_for_ai` returns raw lists; `get_compact_context_for_ai` wraps it with `context_builder` for LLM use |
+| `garmin_coach/db.py` | **Shim de retrocompat — se elimina en Fase 3.** Expone la misma API pública que antes pero delega internamente a las clases repo. El global `_db_instance` se mantiene para que los tests legacy con `patch("garmin_coach.db._db_instance", mock)` sigan funcionando. |
 | `garmin_coach/context_builder.py` | `slim_*` projections + `aggregate_series` + `build_context` to compact TinyDB records before sending to Groq (avoids `context_length_exceeded`) |
 | `garmin_coach/coach_tools.py` | Function-calling tools (find_activity, get_recent_activities, get_*_window, get_fitness_snapshot, search_memory) + `dispatch_tool_call`. Used by `CoachSession.chat` tool loop. |
+| `garmin_coach/domain/activity.py` | `ActivityType(StrEnum)` con `is_run()`/`is_distance_based()`; `Activity` frozen dataclass; `RUN_TYPES`/`NON_DISTANCE_TYPES` frozensets para retrocompat con context_builder/coach_tools |
+| `garmin_coach/domain/wellness.py` | `Sleep`, `HRV`, `BodyBattery`, `TrainingReadiness`, `TrainingStatus`, `Respiration`, `SPO2`, `Stress` — frozen dataclasses con `from_dict`/`as_dict` |
+| `garmin_coach/domain/fitness.py` | `FitnessMetrics`, `RacePredictions`, `LactateThreshold`, `EnduranceScore`, `PersonalRecord` frozen dataclasses |
+| `garmin_coach/domain/session.py` | Reservado para Fase 3 (ChatMessage, ConversationHistory) |
+| `garmin_coach/infrastructure/db/tinydb_factory.py` | `TinyDBFactory(db_path)` — lazy singleton, un único punto de creación de TinyDB |
+| `garmin_coach/infrastructure/db/base_repository.py` | `BaseRepository` — `upsert`, `upsert_many`, `insert`, `find_by_date_range`, `delete_older_than`, `latest`, `count`, `is_empty` |
+| `garmin_coach/infrastructure/db/activity_repository.py` | `ActivityRepository` — `find_runs_in_window`, `find_by_weekday`, `find_by_min_distance_km`, `find_by_type`, `compute_personal_records`, `latest_date` |
+| `garmin_coach/infrastructure/db/wellness_repository.py` | `SleepRepository`, `HRVRepository`, `BodyBatteryRepository`, `TrainingReadinessRepository`, `TrainingStatusRepository`, `RespirationRepository`, `SPO2Repository`, `StressRepository` — todas con `window(days)` |
+| `garmin_coach/infrastructure/db/fitness_repository.py` | `FitnessMetricsRepository`, `RacePredictionsRepository`, `LactateThresholdRepository`, `EnduranceScoreRepository` — `replace(record)` + `latest()` |
+| `garmin_coach/infrastructure/db/memory_repository.py` | `MemoryRepository` — `add(note, timestamp)`, `search(query, limit)` |
+| `garmin_coach/infrastructure/db/sync_log_repository.py` | `SyncLogRepository` — `log(summary, started_at)`, `last_sync()` |
 
 ### TinyDB schema notes
 
@@ -173,6 +184,29 @@ All specs implemented. See `docs/implementations/` for technical details.
 - `SYSTEM_PROMPT` instruye usar `get_personal_records` para PB / mejor marca / récord / tirada más larga.
 - Tests: `test_purge_keeps_old_activities`, suite PRs (10 nuevos en `test_coach_tools.py`). Suite 200 passed, 89.81% coverage.
 - Detalle: `docs/implementations/coach_quality_phase3.md`.
+
+## Implemented: Refactor OOP Fase 1 — Settings + Container + estructura de carpetas (`garmin_coach/app/`)
+
+- `app/config.py`: `Settings` frozen dataclass + `load_settings()` — único punto que lee `os.environ`.
+- `app/container.py`: `Container` skeleton; Fase 1 delega a bot legacy.
+- `app/logging_setup.py`: `configure_logging(settings)` extraído de `main.py`.
+- `app/legacy_bridge.py`: pegamento temporal `start_scheduler()`. Se elimina en Fase 4-5.
+- `prompts/coach_system.txt`: `SYSTEM_PROMPT` como recurso de texto plano; `prompts/__init__.read_system_prompt()` lo carga.
+- `main.py` slim (≤20 líneas): `load_dotenv → load_settings → configure_logging → Container.run()`.
+- Jerarquía de carpetas creada: `domain/`, `infrastructure/{db,llm,garmin,telegram}`, `services/`, `app/`, `tests/{domain,infrastructure,services,app}`.
+- Detalle: `docs/implementations/refactor_oop_phase_1.md`.
+
+## Implemented: Refactor OOP Fase 2 — Domain + Repositories (`garmin_coach/domain/`, `garmin_coach/infrastructure/db/`)
+
+- Domain dataclasses frozen: `Activity` + `ActivityType(StrEnum)` (con `is_run()`/`is_distance_based()`), `Sleep`/`HRV`/`BodyBattery`/`TrainingReadiness`/`TrainingStatus`/`Respiration`/`SPO2`/`Stress`, `FitnessMetrics`/`RacePredictions`/`LactateThreshold`/`EnduranceScore`/`PersonalRecord`. Retrocompat: `RUN_TYPES`/`NON_DISTANCE_TYPES` como frozensets de strings.
+- `TinyDBFactory(db_path)` — único punto de creación TinyDB. `BaseRepository` — operaciones genéricas (`upsert`, `upsert_many`, `find_by_date_range`, `delete_older_than`, `latest`, …).
+- `ActivityRepository`: `find_runs_in_window`, `find_by_weekday`, `find_by_min_distance_km`, `find_by_type`, `compute_personal_records` (lógica de PRs migrada desde `coach_tools`).
+- Wellness repos (`SleepRepository`, `HRVRepository`, …) con `window(days)`.
+- Fitness repos (`FitnessMetricsRepository`, …) con `replace(record)` + `latest()` — replica patrón truncate+insert de `garmin_sync.py`.
+- `MemoryRepository`: `add(note)`, `search(query, limit)`. `SyncLogRepository`: `log(summary)`, `last_sync()`.
+- `db.py` convertido en shim delgado: misma API pública, delega a repos. `_db_instance` global conservado para seam de patch en tests legacy. Se elimina en Fase 3.
+- `Container._build_repositories()` instancia todos los repos (preparado para Fase 3-5).
+- 163 tests nuevos (363 total), 93.12% coverage. Detalle: `docs/implementations/refactor_oop_phase_2.md`.
 
 ## Implemented: smart sync window + purge (`garmin_coach/db.py`, `garmin_coach/garmin_sync.py`)
 

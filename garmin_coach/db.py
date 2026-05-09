@@ -1,91 +1,196 @@
 """
-db.py
-Gestión de la base de datos TinyDB.
+db.py — backward-compatibility shim (Phase 2 refactor).
+
+All public symbols are preserved with identical signatures so that legacy
+modules (coach.py, coach_tools.py, context_builder.py, garmin_sync.py,
+bot.py) continue to work without modification.
+
+Internally, each function builds a repository on top of `get_db()` which
+still returns the raw TinyDB instance.  This preserves the test seam:
+
+    with patch("garmin_coach.db._db_instance", mock_tinydb):
+        ...  # legacy tests keep working
+
+When _db_instance has been replaced by a test patch the repos receive that
+mocked TinyDB.  When it is None (production), TinyDBFactory creates the
+real database lazily.
+
+TODO (Phase 3): delete this file once all callers import from the new layer.
 """
 
-from tinydb import TinyDB
+from __future__ import annotations
+
 from pathlib import Path
 
+from tinydb import TinyDB
+
+from garmin_coach.infrastructure.db.tinydb_factory import TinyDBFactory
+
 DB_PATH = Path("/data/garmin_coach.json")
-_db_instance = None
+
+_db_instance: TinyDB | None = None
 
 
 def get_db() -> TinyDB:
     global _db_instance
     if _db_instance is None:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _db_instance = TinyDB(DB_PATH, indent=2, ensure_ascii=False)
+        _db_instance = TinyDBFactory(DB_PATH).get()
     return _db_instance
 
 
+# ── lazy repo helpers ────────────────────────────────────────────────────────
+# Each call builds a fresh repo on top of the current _db_instance so that
+# test patches to _db_instance are always respected.
+
+
+def _activity_repo():
+    from garmin_coach.infrastructure.db.activity_repository import ActivityRepository
+
+    return ActivityRepository(get_db())
+
+
+def _sleep_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import SleepRepository
+
+    return SleepRepository(get_db())
+
+
+def _hrv_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import HRVRepository
+
+    return HRVRepository(get_db())
+
+
+def _body_battery_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import BodyBatteryRepository
+
+    return BodyBatteryRepository(get_db())
+
+
+def _training_status_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import (
+        TrainingStatusRepository,
+    )
+
+    return TrainingStatusRepository(get_db())
+
+
+def _training_readiness_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import (
+        TrainingReadinessRepository,
+    )
+
+    return TrainingReadinessRepository(get_db())
+
+
+def _respiration_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import RespirationRepository
+
+    return RespirationRepository(get_db())
+
+
+def _spo2_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import SPO2Repository
+
+    return SPO2Repository(get_db())
+
+
+def _stress_repo():
+    from garmin_coach.infrastructure.db.wellness_repository import StressRepository
+
+    return StressRepository(get_db())
+
+
+def _fitness_metrics_repo():
+    from garmin_coach.infrastructure.db.fitness_repository import (
+        FitnessMetricsRepository,
+    )
+
+    return FitnessMetricsRepository(get_db())
+
+
+def _race_predictions_repo():
+    from garmin_coach.infrastructure.db.fitness_repository import (
+        RacePredictionsRepository,
+    )
+
+    return RacePredictionsRepository(get_db())
+
+
+def _lactate_repo():
+    from garmin_coach.infrastructure.db.fitness_repository import (
+        LactateThresholdRepository,
+    )
+
+    return LactateThresholdRepository(get_db())
+
+
+def _endurance_repo():
+    from garmin_coach.infrastructure.db.fitness_repository import (
+        EnduranceScoreRepository,
+    )
+
+    return EnduranceScoreRepository(get_db())
+
+
+def _memory_repo():
+    from garmin_coach.infrastructure.db.memory_repository import MemoryRepository
+
+    return MemoryRepository(get_db())
+
+
+def _sync_log_repo():
+    from garmin_coach.infrastructure.db.sync_log_repository import SyncLogRepository
+
+    return SyncLogRepository(get_db())
+
+
+# ── Public API (same signatures as original db.py) ───────────────────────────
+
+
 def get_context_for_ai(days: int = 14) -> dict:
-    """
-    Extrae un resumen de los últimos `days` días de todas las tablas
-    para pasárselo al modelo de IA como contexto.
-    """
+    """Extract a summary of the last `days` days from all tables for the AI."""
     from datetime import date, timedelta
-    from tinydb import Query
 
-    db = get_db()
     cutoff = (date.today() - timedelta(days=days)).isoformat()
-    Q = Query()
+    today = date.today().isoformat()
 
-    # Actividades recientes (startTimeLocal desde nueva implementación)
+    def _date_sorted(rows: list[dict]) -> list[dict]:
+        return sorted(rows, key=lambda r: r.get("date", ""), reverse=True)
+
     activities = sorted(
-        db.table("activities").search(
-            Q.startTimeLocal.test(lambda v: bool(v) and v >= cutoff)
-        ),
+        [
+            a
+            for a in _activity_repo().all()
+            if bool(a.get("startTimeLocal")) and a.get("startTimeLocal", "") >= cutoff
+        ],
         key=lambda x: x.get("startTimeLocal", ""),
         reverse=True,
-    )[:20]  # máx 20
+    )[:20]
 
-    # Sueño reciente
-    sleep = sorted(
-        db.table("sleep").search(Q.date >= cutoff),
-        key=lambda x: x.get("date", ""),
-        reverse=True,
+    sleep = _date_sorted(_sleep_repo().find_by_date_range("date", cutoff, today))
+    hrv = _date_sorted(_hrv_repo().find_by_date_range("date", cutoff, today))
+    body_battery = _date_sorted(
+        _body_battery_repo().find_by_date_range("date", cutoff, today)
     )
-
-    # HRV reciente
-    hrv = sorted(
-        db.table("hrv").search(Q.date >= cutoff),
-        key=lambda x: x.get("date", ""),
-        reverse=True,
+    training_status = _date_sorted(
+        _training_status_repo().find_by_date_range("date", cutoff, today)
     )
-
-    # Body Battery reciente
-    body_battery = sorted(
-        db.table("body_battery").search(Q.date >= cutoff),
-        key=lambda x: x.get("date", ""),
-        reverse=True,
+    training_readiness = _date_sorted(
+        _training_readiness_repo().find_by_date_range("date", cutoff, today)
     )
+    respiration = _date_sorted(
+        _respiration_repo().find_by_date_range("date", cutoff, today)
+    )
+    spo2 = _date_sorted(_spo2_repo().find_by_date_range("date", cutoff, today))
+    stress = _date_sorted(_stress_repo().find_by_date_range("date", cutoff, today))
 
-    # Daily wellness metrics
-    def _date_sorted(table_name):
-        return sorted(
-            db.table(table_name).search(Q.date >= cutoff),
-            key=lambda x: x.get("date", ""),
-            reverse=True,
-        )
+    fitness_metrics = _fitness_metrics_repo().latest()
+    race_predictions = _race_predictions_repo().latest()
+    lactate_threshold = _lactate_repo().latest()
+    endurance_score = _endurance_repo().latest()
 
-    training_status = _date_sorted("training_status")
-    training_readiness = _date_sorted("training_readiness")
-    respiration = _date_sorted("respiration")
-    spo2 = _date_sorted("spo2")
-    stress = _date_sorted("stress")
-
-    # Fitness snapshot — most recent record of each
-    def _latest(table_name):
-        records = db.table(table_name).all()
-        return max(records, key=lambda x: x.get("date", "")) if records else None
-
-    fitness_metrics = _latest("fitness_metrics")
-    race_predictions = _latest("race_predictions")
-    lactate_threshold = _latest("lactate_threshold")
-    endurance_score = _latest("endurance_score")
-
-    # Memoria del entrenador (notas guardadas)
-    memory = db.table("memory").all()
+    memory = _memory_repo().all()
 
     return {
         "activities": activities,
@@ -107,11 +212,7 @@ def get_context_for_ai(days: int = 14) -> dict:
 
 
 def get_compact_context_for_ai(days: int = 7, max_activities: int = 10) -> dict:
-    """Versión compacta de `get_context_for_ai` pensada para enviar al LLM.
-
-    Aplica las proyecciones de `garmin_coach.context_builder` para reducir el tamaño
-    del JSON inyectado en el prompt y evitar `context_length_exceeded`.
-    """
+    """Compact version of get_context_for_ai for LLM consumption."""
     from garmin_coach.context_builder import build_context
 
     raw = get_context_for_ai(days=days)
@@ -120,27 +221,25 @@ def get_compact_context_for_ai(days: int = 7, max_activities: int = 10) -> dict:
 
 def is_db_empty() -> bool:
     """Return True if no fitness data exists across all data tables."""
-    db = get_db()
     return (
-        len(db.table("activities").all()) == 0
-        and len(db.table("sleep").all()) == 0
-        and len(db.table("hrv").all()) == 0
-        and len(db.table("body_battery").all()) == 0
+        _activity_repo().is_empty()
+        and _sleep_repo().is_empty()
+        and _hrv_repo().is_empty()
+        and _body_battery_repo().is_empty()
     )
 
 
 def get_last_date_in_db() -> str | None:
-    """Return the most recent date (YYYY-MM-DD) across all data tables, or None if empty."""
-    db = get_db()
-    dates = []
+    """Return the most recent date (YYYY-MM-DD) across all data tables, or None."""
+    dates: list[str] = []
 
-    for act in db.table("activities").all():
+    for act in _activity_repo().all():
         start = act.get("startTimeLocal") or act.get("startTime", "")
-        if start:
+        if start and len(start) >= 10:
             dates.append(start[:10])
 
-    for table_name in ("sleep", "hrv", "body_battery"):
-        for record in db.table(table_name).all():
+    for repo in (_sleep_repo(), _hrv_repo(), _body_battery_repo()):
+        for record in repo.all():
             d = record.get("date", "")
             if d:
                 dates.append(d)
@@ -149,70 +248,40 @@ def get_last_date_in_db() -> str | None:
 
 
 def purge_old_data(days: int = 30) -> dict:
-    """Remove records older than `days` days from wellness tables. Returns removed counts.
+    """Remove records older than `days` days from wellness tables.
 
-    NOTE: `activities` is intentionally NOT purged. Activities feed personal records
-    and historical comparisons (half-marathon hace 4 meses, etc.) and are small enough
-    to keep indefinitely.
+    NOTE: activities are intentionally NOT purged (historical PRs must survive).
     """
     from datetime import date, timedelta
 
-    from tinydb import Query
-
-    db = get_db()
     cutoff = (date.today() - timedelta(days=days)).isoformat()
-    Q = Query()
-    removed = {"activities": 0}
+    removed: dict[str, int] = {"activities": 0}
 
-    for table_name in (
-        "sleep",
-        "hrv",
-        "body_battery",
-        "training_status",
-        "training_readiness",
-        "respiration",
-        "spo2",
-        "stress",
+    for name, repo in (
+        ("sleep", _sleep_repo()),
+        ("hrv", _hrv_repo()),
+        ("body_battery", _body_battery_repo()),
+        ("training_status", _training_status_repo()),
+        ("training_readiness", _training_readiness_repo()),
+        ("respiration", _respiration_repo()),
+        ("spo2", _spo2_repo()),
+        ("stress", _stress_repo()),
     ):
-        table = db.table(table_name)
-        old = table.search(Q.date < cutoff)
-        removed[table_name] = len(old)
-        table.remove(Q.date < cutoff)
+        removed[name] = repo.delete_older_than("date", cutoff)
 
     return removed
 
 
-def save_memory(note: str):
-    """Guarda una nota de memoria del entrenador."""
-    from datetime import datetime, timezone
-
-    db = get_db()
-    db.table("memory").insert(
-        {
-            "note": note,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+def save_memory(note: str) -> None:
+    """Save a coach memory note."""
+    _memory_repo().add(note)
 
 
 def get_last_sync() -> str | None:
-    """Devuelve la fecha/hora del último sync."""
-    db = get_db()
-    records = db.table("sync_log").all()
-    if not records:
-        return None
-    latest = max(records, key=lambda x: x.get("synced_at", ""))
-    return latest.get("synced_at")
+    """Return the timestamp of the most recent sync."""
+    return _sync_log_repo().last_sync()
 
 
-def log_sync(summary: dict):
-    """Registra cuándo se hizo el último sync."""
-    from datetime import datetime, timezone
-
-    db = get_db()
-    db.table("sync_log").insert(
-        {
-            "synced_at": datetime.now(timezone.utc).isoformat(),
-            "summary": summary,
-        }
-    )
+def log_sync(summary: dict) -> None:
+    """Record a sync run."""
+    _sync_log_repo().log(summary)
