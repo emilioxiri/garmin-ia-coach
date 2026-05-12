@@ -10,7 +10,10 @@ from datetime import datetime
 from statistics import mean
 from typing import Any, Iterable
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.domain.activity import NON_DISTANCE_TYPES, RUN_TYPES
+
+logger = get_logger(__name__)
 
 _WEEKDAYS_ES = (
     "lunes",

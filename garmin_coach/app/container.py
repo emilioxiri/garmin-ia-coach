@@ -9,6 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from garmin_coach.app.config import Settings
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -276,8 +279,10 @@ class Container:
         )
 
     def run(self) -> None:
+        logger.info("event=container_start")
         self.scheduler.start()
         try:
             self.bot_app.run()
         finally:
             self.scheduler.stop()
+            logger.info("event=container_stop")

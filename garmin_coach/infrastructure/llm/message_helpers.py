@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import json
 
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 
 def coerce_content_to_text(content: object) -> str:
     """Flatten LangChain `AIMessage.content` to a plain string.
@@ -35,6 +39,7 @@ def coerce_content_to_text(content: object) -> str:
 def serialize_assistant_message(msg: object) -> dict:
     """Convert a LangChain AIMessage (with possible tool_calls) into a history dict."""
     text = coerce_content_to_text(getattr(msg, "content", None))
+    logger.debug("event=serialize_assistant_message has_text=%s", bool(text))
     out: dict = {"role": "assistant", "content": text or None}
     tool_calls = getattr(msg, "tool_calls", None) or []
     if tool_calls:

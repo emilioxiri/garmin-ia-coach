@@ -5,13 +5,13 @@ Orchestrates a full Garmin data sync: auth → fetch → upsert → purge → lo
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
 from garminconnect import Garmin
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.infrastructure.garmin.data_fetcher import GarminDataFetcher
 from garmin_coach.services.sync_helpers import (
     compute_sync_window,
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from garmin_coach.infrastructure.db.sync_log_repository import SyncLogRepository
     from garmin_coach.infrastructure.garmin.client import GarminClient
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -86,16 +86,21 @@ class SyncService:
         self._purge_days = purge_days
 
     def run(self) -> SyncSummary:
+        import time as _time
+
+        t0 = _time.monotonic()
         started_at = datetime.now(timezone.utc).isoformat()
+        logger.info("event=sync_start")
         garmin = self._client.authenticate()
         fetcher = self._fetcher_factory(garmin)
 
         start_iso, end_iso = compute_sync_window(
             self._repos, self._settings.days_history
         )
+        logger.info("event=sync_window start=%s end=%s", start_iso, end_iso)
 
         purged = self._purge_wellness(self._purge_days)
-        logger.info("Purged records older than %dd: %s", self._purge_days, purged)
+        logger.info("event=sync_purged days=%d purged=%s", self._purge_days, purged)
 
         counts: dict[str, int] = {
             "activities": 0,
@@ -268,7 +273,14 @@ class SyncService:
             finished_at=finished_at,
         )
         self._sync_log.log(summary.as_dict())
-        logger.info("Sync completed: %s", counts)
+        duration_ms = int((_time.monotonic() - t0) * 1000)
+        logger.info(
+            "event=sync_complete activities=%d sleep=%d hrv=%d duration_ms=%d",
+            counts["activities"],
+            counts["sleep"],
+            counts["hrv"],
+            duration_ms,
+        )
         return summary
 
     # ── Private extraction helpers ────────────────────────────────────────────

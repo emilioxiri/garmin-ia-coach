@@ -5,18 +5,20 @@ ChatMessageHandler: routes free-text messages to CoachService.
 
 from __future__ import annotations
 
-import logging
+import time
 from typing import TYPE_CHECKING
 
 from telegram import Update
 from telegram.ext import ContextTypes
+
+from garmin_coach.app.logging_setup import get_logger
 
 if TYPE_CHECKING:
     from garmin_coach.infrastructure.telegram.auth import Authorizer
     from garmin_coach.infrastructure.telegram.formatter import MessageFormatter
     from garmin_coach.services.coach_service import CoachService
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ChatMessageHandler:
@@ -39,12 +41,23 @@ class ChatMessageHandler:
 
         user_id = update.effective_user.id
         user_message = update.message.text
+        msg_len = len(user_message) if user_message else 0
+        logger.info("event=chat_msg user=%d msg_len=%d", user_id, msg_len)
 
         await context.bot.send_chat_action(
             chat_id=update.effective_chat.id, action="typing"
         )
 
+        t0 = time.monotonic()
         response = self._coach.chat(user_id, user_message)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "event=chat_reply user=%d duration_ms=%d resp_len=%d",
+            user_id,
+            duration_ms,
+            len(response),
+        )
+
         formatted = self._formatter.to_html(response)
         chunks = self._formatter.chunk(formatted)
 

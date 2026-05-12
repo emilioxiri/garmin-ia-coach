@@ -6,20 +6,21 @@ No writes — each method returns raw API dicts or None/[] on failure.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from garminconnect import Garmin
 
-logger = logging.getLogger(__name__)
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 def _safe(name: str, fn, *args, **kwargs) -> Any:
     """Call fn(*args, **kwargs) and return None on any exception."""
     try:
         return fn(*args, **kwargs)
-    except Exception as exc:
-        logger.debug("Garmin fetch '%s' failed: %s", name, exc)
+    except Exception:
+        logger.warning("event=fetch_failed endpoint=%s", name, exc_info=True)
         return None
 
 

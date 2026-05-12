@@ -54,8 +54,10 @@ def test_configure_logging_attaches_handlers(tmp_path):
     try:
         configure_logging(settings)
 
+        from logging.handlers import RotatingFileHandler
+
         handler_types = {type(h) for h in root.handlers}
-        assert logging.FileHandler in handler_types
+        assert RotatingFileHandler in handler_types
         assert logging.StreamHandler in handler_types
     finally:
         # Restore original handlers

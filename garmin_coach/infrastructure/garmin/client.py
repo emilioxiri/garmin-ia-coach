@@ -5,17 +5,26 @@ Garmin Connect authentication with session persistence and pluggable MFA.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from garminconnect import Garmin
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.infrastructure.garmin.mfa_handler import MFAHandler
 
 if TYPE_CHECKING:
     from garmin_coach.app.config import Settings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+def _mask_email(email: str) -> str:
+    """Return email with local part partially masked: em***@domain.com."""
+    if "@" not in email:
+        return "***"
+    local, domain = email.split("@", 1)
+    visible = local[:2] if len(local) > 2 else local[:1]
+    return f"{visible}***@{domain}"
 
 
 class GarminClient:
@@ -32,8 +41,15 @@ class GarminClient:
 
     def authenticate(self) -> Garmin:
         if self._client is not None:
+            logger.debug(
+                "event=auth_cache_hit email=%s",
+                _mask_email(self._settings.garmin_email),
+            )
             return self._client
 
+        logger.info(
+            "event=auth_start email=%s", _mask_email(self._settings.garmin_email)
+        )
         self._mfa.clear()
 
         def _prompt_mfa() -> str:

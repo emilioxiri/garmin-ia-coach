@@ -6,14 +6,19 @@ CommandHandlers class: one method per Telegram bot command.
 from __future__ import annotations
 
 import asyncio
-import logging
+import time
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from garmin_coach.app.logging_setup import get_logger
+
 if TYPE_CHECKING:
+    from garmin_coach.infrastructure.db.memory_repository import MemoryRepository
+    from garmin_coach.infrastructure.db.sync_log_repository import SyncLogRepository
+    from garmin_coach.infrastructure.garmin.client import GarminClient
     from garmin_coach.infrastructure.garmin.mfa_handler import MFAHandler
     from garmin_coach.infrastructure.telegram.auth import Authorizer
     from garmin_coach.infrastructure.telegram.formatter import MessageFormatter
@@ -21,11 +26,8 @@ if TYPE_CHECKING:
     from garmin_coach.services.coach_service import CoachService
     from garmin_coach.services.context_builder import ContextBuilder
     from garmin_coach.services.sync_service import SyncService
-    from garmin_coach.infrastructure.db.memory_repository import MemoryRepository
-    from garmin_coach.infrastructure.db.sync_log_repository import SyncLogRepository
-    from garmin_coach.infrastructure.garmin.client import GarminClient
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CommandHandlers:
@@ -58,6 +60,8 @@ class CommandHandlers:
     async def cmd_start(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/start user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
@@ -76,15 +80,25 @@ class CommandHandlers:
     async def cmd_sync(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/sync user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
         msg = await update.message.reply_text(
             "🔄 Sincronizando datos de Garmin... puede tardar un momento."
         )
+        t0 = time.monotonic()
         try:
             loop = asyncio.get_running_loop()
             summary = await loop.run_in_executor(None, self._sync.run)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "event=cmd_end command=/sync user=%d duration_ms=%d activities=%d",
+                user_id,
+                duration_ms,
+                summary.activities,
+            )
             text = (
                 f"✅ *Sync completado*\n"
                 f"🏃 Actividades: {summary.activities}\n"
@@ -94,12 +108,16 @@ class CommandHandlers:
             )
             await msg.edit_text(text, parse_mode="Markdown")
         except Exception as exc:
-            logger.error("Error en sync: %s", exc)
+            logger.error(
+                "event=cmd_failed command=/sync user=%d", user_id, exc_info=True
+            )
             await msg.edit_text(f"❌ Error en sync: {exc}")
 
     async def cmd_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/status user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
@@ -116,13 +134,18 @@ class CommandHandlers:
                 f"🧠 Notas de memoria: {len(raw['memory'])}"
             )
             await update.message.reply_text(text, parse_mode="Markdown")
+            logger.info("event=cmd_end command=/status user=%d", user_id)
         except Exception as exc:
-            logger.error("Error en status: %s", exc)
+            logger.error(
+                "event=cmd_failed command=/status user=%d", user_id, exc_info=True
+            )
             await update.message.reply_text(f"❌ Error: {exc}")
 
     async def cmd_briefing(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/briefing user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
@@ -131,9 +154,17 @@ class CommandHandlers:
         msg = await update.message.reply_text(
             "🤔 Generando tu briefing personalizado..."
         )
+        t0 = time.monotonic()
         try:
             loop = asyncio.get_running_loop()
             briefing = await loop.run_in_executor(None, self._briefing.generate, moment)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "event=cmd_end command=/briefing user=%d moment=%s duration_ms=%d",
+                user_id,
+                moment,
+                duration_ms,
+            )
             formatted = self._formatter.to_html(briefing)
             chunks = self._formatter.chunk(formatted)
             try:
@@ -146,17 +177,21 @@ class CommandHandlers:
                 except Exception:
                     await update.message.reply_text(chunk)
         except Exception as exc:
-            logger.error("Error en briefing: %s", exc)
+            logger.error(
+                "event=cmd_failed command=/briefing user=%d", user_id, exc_info=True
+            )
             await msg.edit_text(f"❌ Error generando briefing: {exc}")
 
     async def cmd_reset(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/reset user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
-        user_id = update.effective_user.id
         self._coach.reset(user_id)
+        logger.info("event=cmd_end command=/reset user=%d", user_id)
         await update.message.reply_text(
             "🔄 Conversación reiniciada. ¡Empezamos de nuevo!"
         )
@@ -164,19 +199,26 @@ class CommandHandlers:
     async def cmd_resetsession(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/resetsession user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
         try:
             self._garmin_client.reset()
+            logger.info("event=cmd_end command=/resetsession user=%d", user_id)
             await update.message.reply_text(
                 "🗑 Sesión de Garmin eliminada. El próximo /sync hará login completo."
             )
         except Exception as exc:
-            logger.error("Error en resetsession: %s", exc)
+            logger.error(
+                "event=cmd_failed command=/resetsession user=%d", user_id, exc_info=True
+            )
             await update.message.reply_text(f"❌ Error: {exc}")
 
     async def cmd_mfa(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/mfa user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
@@ -185,6 +227,7 @@ class CommandHandlers:
             await update.message.reply_text("Uso: /mfa <código>")
             return
         self._mfa.provide_code(code)
+        logger.info("event=cmd_end command=/mfa user=%d", user_id)
         await update.message.reply_text(
             "✅ Código MFA enviado, continuando login de Garmin..."
         )
@@ -192,6 +235,8 @@ class CommandHandlers:
     async def cmd_memoria(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/memoria user=%d", user_id)
         if not self._auth.is_authorized(update):
             await update.message.reply_text("No autorizado.")
             return
@@ -203,6 +248,9 @@ class CommandHandlers:
             )
             return
         self._memory_repo.add(note)
+        logger.info(
+            "event=cmd_end command=/memoria user=%d note_len=%d", user_id, len(note)
+        )
         await update.message.reply_text(
             f"🧠 Guardado en memoria: _{note}_", parse_mode="Markdown"
         )

@@ -5,12 +5,13 @@ Telegram user authorization check + decorator.
 
 from __future__ import annotations
 
-import logging
 from typing import Callable
 
 from telegram import Update
 
-logger = logging.getLogger(__name__)
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 class Authorizer:

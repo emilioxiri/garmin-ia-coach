@@ -7,10 +7,10 @@ Depends on LLMClient, ToolRegistry, ContextBuilder, and a system prompt string.
 from __future__ import annotations
 
 import json
-import logging
 
 from groq import BadRequestError
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.infrastructure.llm.message_helpers import (
     coerce_content_to_text,
     normalize_tool_calls,
@@ -24,7 +24,7 @@ from garmin_coach.infrastructure.llm.tool_use_recovery import (
     salvage_tool_use_failed,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 MAX_TOOL_ITERATIONS = 5
 
@@ -71,10 +71,15 @@ class CoachSession:
         try:
             assistant_message = ""
             tool_specs = self._registry.specs()
-            for _ in range(self._max_iterations):
+            for iteration in range(self._max_iterations):
                 messages = [
                     {"role": "system", "content": self._system_prompt}
                 ] + self.history
+                logger.info(
+                    "event=chat_round iter=%d history_len=%d",
+                    iteration,
+                    len(self.history),
+                )
                 try:
                     response = self._llm.chat(messages, tool_specs=tool_specs)
                 except BadRequestError as exc:
@@ -146,6 +151,11 @@ class CoachSession:
                 )
 
                 tool_calls = normalize_tool_calls(response)
+                logger.info(
+                    "event=chat_round_result iter=%d tool_calls=%d",
+                    iteration,
+                    len(tool_calls),
+                )
                 if not tool_calls:
                     inline = parse_inline_tool_calls(assistant_message)
                     if inline:

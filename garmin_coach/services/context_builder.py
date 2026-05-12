@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.services.projections import (
     aggregate_series,
     compute_fastest_runs,
@@ -28,6 +29,8 @@ from garmin_coach.services.projections import (
     slim_training_readiness,
     slim_training_status,
 )
+
+logger = get_logger(__name__)
 
 NOTABLE_RUNS_LIMIT = 3
 
@@ -126,6 +129,9 @@ class ContextBuilder:
 
     def build(self, days: int = 7, max_activities: int = 15) -> dict:
         """Return a compact context dict slimmed for LLM consumption."""
+        logger.debug(
+            "event=context_build days=%d max_activities=%d", days, max_activities
+        )
         raw = self.build_raw(days=days)
         return _compact(raw, max_activities=max_activities)
 

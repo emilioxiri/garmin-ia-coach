@@ -6,10 +6,11 @@ TelegramBotApp: builds the Application, registers handlers, manages lifecycle.
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING
 
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+
+from garmin_coach.app.logging_setup import get_logger
 
 if TYPE_CHECKING:
     from garmin_coach.app.config import Settings
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from garmin_coach.infrastructure.telegram.handlers.chat import ChatMessageHandler
     from garmin_coach.infrastructure.telegram.handlers.commands import CommandHandlers
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TelegramBotApp:
@@ -85,11 +86,17 @@ class TelegramBotApp:
     async def send_to_user(self, text: str) -> None:
         """Send a message to the configured allowed user (for scheduled messages)."""
         if self._app is None:
-            logger.warning("send_to_user called before app was built")
+            logger.warning("event=send_to_user_skipped reason=app_not_built")
             return
         formatted = self._formatter.to_html(text)
         chunks = self._formatter.chunk(formatted)
         allowed_user_id = self._settings.telegram_allowed_user_id
+        logger.info(
+            "event=send_to_user chat_id=%d chunks=%d total_len=%d",
+            allowed_user_id,
+            len(chunks),
+            len(formatted),
+        )
         for chunk in chunks:
             try:
                 await self._app.bot.send_message(
@@ -97,11 +104,17 @@ class TelegramBotApp:
                 )
             except Exception as exc:
                 logger.warning(
-                    "Fallback without parse_mode for scheduled message: %s", exc
+                    "event=send_to_user_html_failed reason=parse_mode chat_id=%d: %s",
+                    allowed_user_id,
+                    exc,
                 )
                 try:
                     await self._app.bot.send_message(
                         chat_id=allowed_user_id, text=chunk
                     )
-                except Exception as exc2:
-                    logger.error("Error sending scheduled message: %s", exc2)
+                except Exception:
+                    logger.error(
+                        "event=send_to_user_failed chat_id=%d",
+                        allowed_user_id,
+                        exc_info=True,
+                    )

@@ -42,6 +42,12 @@ The following must remain true after any change:
 5. Report findings as: **kept**, **risk**, **must-fix**. One line each. No
    prose padding. Quote file:line for any issue.
 
+## Logging invariants
+
+- Any new write operation (upsert, insert, replace, delete) must either go through `BaseRepository` (which logs at DEBUG) or explicitly log counts with `logger.debug("event=<op> table=<t> count=<n>")`.
+- `TinyDBFactory.get()` logs `event=tinydb_init path=...` (INFO) on first creation — do not remove this.
+- Never use `print()` in repository or factory code.
+
 ## Out of scope
 
 Do not review unrelated files, style, or naming. Schema integrity only.

@@ -9,6 +9,10 @@ import html
 import re
 from typing import ClassVar
 
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 _HEADER_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 
@@ -46,4 +50,5 @@ class MessageFormatter:
                 split_at = limit
             parts.append(text[:split_at])
             text = text[split_at:].lstrip("\n")
+        logger.debug("event=chunk_split total_len=%d chunks=%d", len(text), len(parts))
         return parts

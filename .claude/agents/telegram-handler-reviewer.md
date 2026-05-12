@@ -22,7 +22,7 @@ You are a Telegram handler reviewer for the garmin-coach app. `garmin_coach/bot.
 3. **parse_mode fallback.** Sending with `parse_mode="HTML"` must be wrapped in `try/except` with a fallback `reply_text` (or `edit_text`) without `parse_mode`. Telegram rejects messages with malformed entities and a single bad `<` ruins the response.
 4. **Chunking.** If the formatted text could exceed 4000 chars (any LLM output is potentially long), split into 4000-char slices and send sequentially with the same fallback pattern.
 5. **No blocking sync calls in coroutines.** Use `loop.run_in_executor(None, fn, *args)` for `sync_all`, `generate_daily_briefing`, anything that hits Groq or Garmin synchronously.
-6. **No raw exceptions to the user.** Catch broad exceptions and reply with `❌ Error...` so the chat never silences. Log via the module logger, not `print`.
+6. **No raw exceptions to the user.** Catch broad exceptions and reply with `❌ Error...` so the chat never silences. Log via the module logger (`get_logger(__name__)`), never `print()`. Every new handler must log entry with `event=cmd_start command=/foo user=<id>` at INFO, exit with `event=cmd_end` (+ duration_ms for slow ops), and failures with `logger.error("event=cmd_failed ...", exc_info=True)`.
 7. **Sessions are owned by the loop.** `get_session(user_id)` reads/writes `_sessions`. Never call from the scheduler thread.
 8. **Send-side encoding.** Memory-saved notes use Markdown-flavored italic; if the note contains stray `_` characters Telegram's parser breaks. Prefer HTML or escape.
 
@@ -33,6 +33,15 @@ You are a Telegram handler reviewer for the garmin-coach app. `garmin_coach/bot.
 3. For LLM output paths, trace: source → `format_for_telegram` → `try parse_mode="HTML" / except no parse_mode` → chunking if >4000.
 4. For each finding, cite `bot.py:line` and quote 2–3 lines of context.
 5. Output sections: **safe**, **risk**, **must-fix**. One line per finding.
+
+## Logging invariants
+
+Every new or modified handler must:
+- Import `from garmin_coach.app.logging_setup import get_logger; logger = get_logger(__name__)` at module level.
+- Log `event=cmd_start command=/foo user=<id>` (INFO) before any logic.
+- Log `event=cmd_end command=/foo user=<id> duration_ms=<n>` (INFO) on success.
+- Log `event=cmd_failed command=/foo user=<id>` with `exc_info=True` (ERROR) on exception.
+- Never use `print()`. Never `except: pass` without `logger.exception(...)`.
 
 ## Out of scope
 

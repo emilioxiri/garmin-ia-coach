@@ -23,6 +23,7 @@ class Settings:
     log_path: Path
     timezone: str = "Europe/Madrid"
     llm_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    log_level: str = "INFO"
 
 
 def load_settings() -> Settings:
@@ -67,4 +68,5 @@ def load_settings() -> Settings:
         log_path=Path(os.getenv("LOG_PATH", "/data/logs/bot.log")),
         timezone=os.getenv("TIMEZONE", "Europe/Madrid"),
         llm_model=os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+        log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
     )

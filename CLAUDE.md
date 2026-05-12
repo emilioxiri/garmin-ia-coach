@@ -109,6 +109,43 @@ Garmin Connect sometimes requires MFA. Flow: `GarminClient.authenticate()` passe
 | `GROQ_API_KEY` | Groq API key for Llama inference |
 | `SYNC_TIME_MORNING` / `SYNC_TIME_EVENING` | Scheduler times (HH:MM, 24h, Europe/Madrid TZ) |
 | `DAYS_HISTORY` | Days to sync on first run (default 30) |
+| `LOG_LEVEL` | Logging verbosity: DEBUG / INFO / WARNING / ERROR (default INFO) |
+
+## Logging
+
+Setup central en `garmin_coach/app/logging_setup.py`:
+- `RotatingFileHandler` 5 MB × 5 backups en `settings.log_path` (`/data/logs/bot.log` por defecto).
+- `StreamHandler` para `docker logs`.
+- Nivel configurable vía `LOG_LEVEL` env var (default INFO).
+- Silencios: `httpx`, `garminconnect`, `urllib3`, `httpcore` → WARNING.
+
+Patrón canónico (TODOS los módulos con I/O o lógica de negocio):
+
+```python
+from garmin_coach.app.logging_setup import get_logger
+logger = get_logger(__name__)
+```
+
+Convención de mensajes: `event=<snake_case> key1=val1 key2=val2`
+
+Ejemplo: `logger.info("event=sync_complete activities=%d sleep=%d duration_ms=%d", a, s, d)`
+
+| Nivel | Cuándo |
+|-------|--------|
+| `DEBUG` | Flujo interno detallado (upserts, iteraciones de tool loop, payloads). Off en prod. |
+| `INFO` | Eventos de negocio: arranque/parada, comandos Telegram, sync start/end con totales, LLM call start/end con duración, briefing enviado, MFA solicitado/recibido. |
+| `WARNING` | Degradaciones: fetch Garmin endpoint vacío, fallback HTML→texto plano, retry de tool call, recovery de `<function=...>`. |
+| `ERROR` | Excepciones controladas (siempre `exc_info=True`). I/O fallido que aborta una operación. |
+| `CRITICAL` | App no puede continuar (init failure). |
+
+Reglas duras:
+- Nunca usar `print()`.
+- Nunca `except: pass` sin `logger.exception(...)` antes.
+- Operaciones externas (Garmin API, Telegram send, Groq invoke, TinyDB write) → SIEMPRE log INFO entrada+salida con duración, ERROR en fallo.
+- Nunca loguear `password`, `groq_api_key`, ni tokens de sesión Garmin. Email solo enmascarado (`em***@domain.com`).
+- Loggers a nivel de módulo, no de instancia.
+
+**"Los logs son tan importantes como los tests. Toda I/O externa o decisión de negocio debe quedar trazada. PRs sin logs en operaciones nuevas son tan inválidas como PRs sin tests."**
 
 ## Documentation
 - Finish the new implementations and bug fixes documenting everything on `docs`folder. 

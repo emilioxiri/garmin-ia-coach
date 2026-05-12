@@ -6,12 +6,13 @@ Scheduler: runs morning/evening sync+briefing jobs in a daemon thread.
 from __future__ import annotations
 
 import asyncio
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING
 
 import schedule
+
+from garmin_coach.app.logging_setup import get_logger
 
 if TYPE_CHECKING:
     from garmin_coach.app.config import Settings
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from garmin_coach.services.briefing_service import BriefingService
     from garmin_coach.services.sync_service import SyncService
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class Scheduler:
@@ -48,7 +49,7 @@ class Scheduler:
         schedule.every().day.at(self._settings.sync_time_morning).do(self._morning_job)
         schedule.every().day.at(self._settings.sync_time_evening).do(self._evening_job)
         logger.info(
-            "Scheduler configured: morning=%s, evening=%s",
+            "event=scheduler_start morning=%s evening=%s",
             self._settings.sync_time_morning,
             self._settings.sync_time_evening,
         )
@@ -58,6 +59,7 @@ class Scheduler:
         return self._thread
 
     def stop(self) -> None:
+        logger.info("event=scheduler_stop")
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=5)
@@ -74,11 +76,12 @@ class Scheduler:
         self._run_job("evening")
 
     def _run_job(self, moment: str) -> None:
-        logger.info("Scheduled job started: %s", moment)
+        t0 = time.monotonic()
+        logger.info("event=job_start moment=%s", moment)
         try:
             self._sync.run()
-        except Exception as exc:
-            logger.error("Scheduled sync error (%s): %s", moment, exc)
+        except Exception:
+            logger.error("event=job_sync_failed moment=%s", moment, exc_info=True)
 
         try:
             briefing = self._briefing.generate(moment)
@@ -88,6 +91,12 @@ class Scheduler:
                     self._bot_app.send_to_user(briefing), loop
                 )
             else:
-                logger.warning("Briefing not sent: asyncio loop not available")
-        except Exception as exc:
-            logger.error("Scheduled briefing error (%s): %s", moment, exc)
+                logger.warning(
+                    "event=job_briefing_skipped reason=loop_unavailable moment=%s",
+                    moment,
+                )
+        except Exception:
+            logger.error("event=job_briefing_failed moment=%s", moment, exc_info=True)
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        logger.info("event=job_end moment=%s duration_ms=%d", moment, duration_ms)

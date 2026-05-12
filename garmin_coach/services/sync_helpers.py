@@ -5,14 +5,15 @@ Pure helper functions for sync orchestration.
 
 from __future__ import annotations
 
-import logging
 from datetime import date, timedelta
-from typing import Callable, Iterator, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Iterator
+
+from garmin_coach.app.logging_setup import get_logger
 
 if TYPE_CHECKING:
     from garmin_coach.app.container import Repositories
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def daterange(start_iso: str, end_iso: str) -> Iterator[str]:

@@ -6,9 +6,11 @@ BriefingService: generates scheduled morning/evening briefings using the LLM.
 from __future__ import annotations
 
 import json
-import logging
+import time
 
-logger = logging.getLogger(__name__)
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 class BriefingService:
@@ -25,6 +27,8 @@ class BriefingService:
         moment: 'morning' or 'evening'.
         Returns the LLM response string, or an error message on failure.
         """
+        logger.info("event=briefing_start moment=%s", moment)
+        t0 = time.monotonic()
         context = self._context_builder.build(days=7)
 
         if moment == "morning":
@@ -45,12 +49,23 @@ class BriefingService:
             )
 
         try:
-            return self._llm.briefing(
+            result = self._llm.briefing(
                 [
                     {"role": "system", "content": self._system_prompt},
                     {"role": "user", "content": prompt},
                 ]
             )
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "event=briefing_end moment=%s duration_ms=%d", moment, duration_ms
+            )
+            return result
         except Exception as exc:
-            logger.error("Error generando briefing: %s", exc)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.error(
+                "event=briefing_failed moment=%s duration_ms=%d",
+                moment,
+                duration_ms,
+                exc_info=True,
+            )
             return f"❌ No se pudo generar el briefing: {exc}"

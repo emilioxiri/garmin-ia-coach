@@ -8,8 +8,11 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any, ClassVar
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.domain.activity import RUN_TYPES
 from garmin_coach.services.tools.base import Tool, ToolResult
+
+logger = get_logger(__name__)
 
 MAX_ACTIVITIES_RESULT = 25
 MAX_WINDOW_DAYS = 90
@@ -158,9 +161,9 @@ class FindActivityTool(Tool):
             )
         ]
         matches.sort(key=lambda a: a.get("startTimeLocal", ""), reverse=True)
-        return ToolResult(
-            data=[slim_activity(a) for a in matches[:MAX_ACTIVITIES_RESULT]]
-        )
+        result = [slim_activity(a) for a in matches[:MAX_ACTIVITIES_RESULT]]
+        logger.debug("event=find_activity matches=%d", len(result))
+        return ToolResult(data=result)
 
 
 class GetRecentActivitiesTool(Tool):

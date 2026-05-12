@@ -10,6 +10,10 @@ import re
 
 from groq import BadRequestError
 
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 FUNCTION_TAG_RE = re.compile(
     r"<\s*function\s*=.*?(?:</?function>|$)", re.DOTALL | re.IGNORECASE
 )
@@ -62,6 +66,8 @@ def salvage_tool_use_failed(error: BadRequestError) -> str | None:
     if failed is None:
         return None
     cleaned = FUNCTION_TAG_RE.sub("", failed).strip()
+    if cleaned:
+        logger.warning("event=tool_recovery strategy=salvage_plain_text")
     return cleaned or None
 
 

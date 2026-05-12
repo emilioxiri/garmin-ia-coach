@@ -5,12 +5,12 @@ ToolRegistry: central registry for function-calling tools.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.services.tools.base import Tool
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 _BOOL_TRUE = {"true", "1", "yes", "y", "si", "sí"}
@@ -61,7 +61,11 @@ def coerce_args_by_schema(args: dict, schema: dict) -> dict:
         if prop_type == "integer" and isinstance(value, float):
             out[key] = int(value)
             continue
-        if prop_type == "number" and isinstance(value, int) and not isinstance(value, bool):
+        if (
+            prop_type == "number"
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        ):
             out[key] = float(value)
             continue
         out[key] = value
@@ -85,16 +89,20 @@ class ToolRegistry:
         """
         tool = self._tools.get(name)
         if tool is None:
+            logger.warning("event=tool_unknown name=%s", name)
             return {"error": f"unknown tool: {name}"}
+        logger.info("event=tool_exec name=%s", name)
         try:
             clean_args = coerce_args_by_schema(args or {}, tool.parameters)
             result = tool.handle(**clean_args)
             if result.error is not None:
+                logger.warning("event=tool_error name=%s error=%s", name, result.error)
                 return {"error": result.error}
+            logger.debug("event=tool_ok name=%s", name)
             return result.data
         except TypeError as e:
-            logger.warning("tool %s rejected args %s: %s", name, args, e)
+            logger.warning("event=tool_bad_args name=%s: %s", name, e)
             return {"error": f"bad arguments for {name}: {e}"}
-        except Exception as e:
-            logger.exception("tool %s crashed", name)
-            return {"error": f"{name} failed: {e}"}
+        except Exception:
+            logger.exception("event=tool_crashed name=%s", name)
+            return {"error": f"{name} failed"}

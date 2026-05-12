@@ -122,9 +122,12 @@ def test_coerce_passes_through_correct_types():
             "s": {"type": "string"},
         }
     }
-    assert coerce_args_by_schema(
-        {"i": 3, "f": 1.5, "b": True, "s": "x"}, schema
-    ) == {"i": 3, "f": 1.5, "b": True, "s": "x"}
+    assert coerce_args_by_schema({"i": 3, "f": 1.5, "b": True, "s": "x"}, schema) == {
+        "i": 3,
+        "f": 1.5,
+        "b": True,
+        "s": "x",
+    }
 
 
 def test_coerce_unknown_property_passes_through():

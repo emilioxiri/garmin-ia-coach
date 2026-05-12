@@ -9,6 +9,10 @@ from typing import Iterable
 
 from tinydb import TinyDB
 
+from garmin_coach.app.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 
 class BaseRepository:
     """Generic TinyDB repository.
@@ -53,6 +57,7 @@ class BaseRepository:
         for record in records:
             self.upsert(record)
             count += 1
+        logger.debug("event=upsert_many table=%s count=%d", self._table_name, count)
         return count
 
     def insert(self, record: dict) -> None:
@@ -76,6 +81,12 @@ class BaseRepository:
         count = len(old)
         if count:
             self._table.remove(Q[date_field] < cutoff_iso)
+            logger.debug(
+                "event=delete_older_than table=%s cutoff=%s removed=%d",
+                self._table_name,
+                cutoff_iso,
+                count,
+            )
         return count
 
     def latest(self, date_field: str) -> dict | None:

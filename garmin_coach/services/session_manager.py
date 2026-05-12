@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from typing import Callable
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.services.coach_session import CoachSession
+
+logger = get_logger(__name__)
 
 
 class SessionManager:
@@ -19,12 +22,14 @@ class SessionManager:
 
     def get_or_create(self, user_id: int) -> CoachSession:
         if user_id not in self._sessions:
+            logger.info("event=session_create user=%d", user_id)
             self._sessions[user_id] = self._factory()
         return self._sessions[user_id]
 
     def reset(self, user_id: int) -> None:
         session = self._sessions.get(user_id)
         if session is not None:
+            logger.info("event=session_reset user=%d", user_id)
             session.reset()
 
     def remove(self, user_id: int) -> None:

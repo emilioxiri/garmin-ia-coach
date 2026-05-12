@@ -5,9 +5,14 @@ LangChain ChatGroq implementation of LLMClient.
 
 from __future__ import annotations
 
+import time
+
 from langchain_groq import ChatGroq
 
+from garmin_coach.app.logging_setup import get_logger
 from garmin_coach.infrastructure.llm.base import LLMClient
+
+logger = get_logger(__name__)
 
 
 class ChatGroqClient(LLMClient):
@@ -38,13 +43,56 @@ class ChatGroqClient(LLMClient):
         Propagates groq.BadRequestError without catching it — recovery lives in
         CoachSession via tool_use_recovery helpers.
         """
-        client = (
-            self._chat_client.bind_tools(tool_specs)
-            if tool_specs
-            else self._chat_client
+        t0 = time.monotonic()
+        n_tools = len(tool_specs) if tool_specs else 0
+        logger.info(
+            "event=llm_call_start model=%s n_tools=%d msgs=%d",
+            self._model,
+            n_tools,
+            len(messages),
         )
-        return client.invoke(messages)
+        try:
+            client = (
+                self._chat_client.bind_tools(tool_specs)
+                if tool_specs
+                else self._chat_client
+            )
+            response = client.invoke(messages)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "event=llm_call_end model=%s duration_ms=%d", self._model, duration_ms
+            )
+            return response
+        except Exception:
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.error(
+                "event=llm_call_failed model=%s duration_ms=%d",
+                self._model,
+                duration_ms,
+                exc_info=True,
+            )
+            raise
 
     def briefing(self, messages: list[dict]) -> str:
-        response = self._briefing_client.invoke(messages)
-        return response.content
+        t0 = time.monotonic()
+        logger.info(
+            "event=llm_briefing_start model=%s msgs=%d", self._model, len(messages)
+        )
+        try:
+            response = self._briefing_client.invoke(messages)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "event=llm_briefing_end model=%s duration_ms=%d",
+                self._model,
+                duration_ms,
+            )
+            return response.content
+        except Exception:
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.error(
+                "event=llm_briefing_failed model=%s duration_ms=%d",
+                self._model,
+                duration_ms,
+                exc_info=True,
+            )
+            raise

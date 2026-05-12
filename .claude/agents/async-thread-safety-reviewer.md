@@ -44,6 +44,13 @@ You are a concurrency reviewer for the garmin-coach app.
    show the surrounding 3–5 lines.
 4. Output sections: **safe**, **risk**, **must-fix**. One line per finding.
 
+## Logging invariants
+
+- Any scheduler job (`_run_job`, `_morning_job`, `_evening_job`) must log `event=job_start moment=<m>` (INFO) and `event=job_end moment=<m> duration_ms=<n>` (INFO), plus `event=job_*_failed` (ERROR, `exc_info=True`) on exception.
+- Any asyncio callback or coroutine bridged from the scheduler thread via `run_coroutine_threadsafe` must log start/end at INFO level.
+- `threading.Event.wait()` calls with a timeout must log WARNING on timeout (`event=*_timeout`).
+- Never use `print()` in concurrency-related paths; use `get_logger(__name__)`.
+
 ## Out of scope
 
 Style, naming, unrelated logic. Concurrency only.
