@@ -58,6 +58,7 @@ class TelegramBotApp:
         app.add_handler(CommandHandler("resetsession", self._commands.cmd_resetsession))
         app.add_handler(CommandHandler("mfa", self._commands.cmd_mfa))
         app.add_handler(CommandHandler("memoria", self._commands.cmd_memoria))
+        app.add_handler(CommandHandler("logs", self._commands.cmd_logs))
         app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._chat.handle)
         )

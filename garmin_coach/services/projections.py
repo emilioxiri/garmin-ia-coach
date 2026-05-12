@@ -271,6 +271,16 @@ def slim_fitness_metrics(record: dict | None) -> dict | None:
     }
 
 
+def _seconds_to_hms(seconds: int | None) -> str | None:
+    if seconds is None or not isinstance(seconds, (int, float)):
+        return None
+    s = int(seconds)
+    h = s // 3600
+    m = (s % 3600) // 60
+    sec = s % 60
+    return f"{h}:{m:02d}:{sec:02d}"
+
+
 def slim_race_predictions(record: dict | None) -> dict | None:
     if not record:
         return None
@@ -280,18 +290,18 @@ def slim_race_predictions(record: dict | None) -> dict | None:
         if isinstance(latest, dict):
             return {
                 "date": record.get("date"),
-                "time5K": latest.get("time5K"),
-                "time10K": latest.get("time10K"),
-                "timeHalfMarathon": latest.get("timeHalfMarathon"),
-                "timeMarathon": latest.get("timeMarathon"),
+                "time5K": _seconds_to_hms(latest.get("time5K")),
+                "time10K": _seconds_to_hms(latest.get("time10K")),
+                "timeHalfMarathon": _seconds_to_hms(latest.get("timeHalfMarathon")),
+                "timeMarathon": _seconds_to_hms(latest.get("timeMarathon")),
             }
     if isinstance(predictions, dict):
         return {
             "date": record.get("date"),
-            "time5K": predictions.get("time5K"),
-            "time10K": predictions.get("time10K"),
-            "timeHalfMarathon": predictions.get("timeHalfMarathon"),
-            "timeMarathon": predictions.get("timeMarathon"),
+            "time5K": _seconds_to_hms(predictions.get("time5K")),
+            "time10K": _seconds_to_hms(predictions.get("time10K")),
+            "timeHalfMarathon": _seconds_to_hms(predictions.get("timeHalfMarathon")),
+            "timeMarathon": _seconds_to_hms(predictions.get("timeMarathon")),
         }
     return {"date": record.get("date")}
 

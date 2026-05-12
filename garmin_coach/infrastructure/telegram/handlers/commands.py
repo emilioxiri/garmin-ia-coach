@@ -6,8 +6,11 @@ CommandHandlers class: one method per Telegram bot command.
 from __future__ import annotations
 
 import asyncio
+import html
 import time
+from collections import deque
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from telegram import Update
@@ -30,6 +33,12 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _tail_file(path: Path, n: int) -> str:
+    """Return last n lines of a text file without loading it all into memory."""
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        return "\n".join(deque(fh, maxlen=n))
+
+
 class CommandHandlers:
     """Handles all /command messages from Telegram."""
 
@@ -45,6 +54,7 @@ class CommandHandlers:
         formatter: "MessageFormatter",
         authorizer: "Authorizer",
         garmin_client: "GarminClient",
+        log_path: Path,
     ) -> None:
         self._coach = coach_service
         self._briefing = briefing_service
@@ -56,6 +66,7 @@ class CommandHandlers:
         self._formatter = formatter
         self._auth = authorizer
         self._garmin_client = garmin_client
+        self._log_path = log_path
 
     async def cmd_start(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -72,7 +83,8 @@ class CommandHandlers:
             "/status — Ver estado de los datos\n"
             "/briefing — Briefing del día\n"
             "/reset — Reiniciar conversación\n"
-            "/memoria — Añadir nota de memoria\n\n"
+            "/memoria — Añadir nota de memoria\n"
+            "/logs [N] — Ver últimas N líneas de log (máx 500)\n\n"
             "O simplemente escríbeme y te respondo como tu coach 🏃",
             parse_mode="Markdown",
         )
@@ -231,6 +243,68 @@ class CommandHandlers:
         await update.message.reply_text(
             "✅ Código MFA enviado, continuando login de Garmin..."
         )
+
+    async def cmd_logs(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        user_id = update.effective_user.id
+        logger.info("event=cmd_start command=/logs user=%d", user_id)
+        if not self._auth.is_authorized(update):
+            await update.message.reply_text("No autorizado.")
+            return
+
+        raw_arg = (context.args or ["50"])[0]
+        try:
+            n_lines = max(1, min(int(raw_arg), 500))
+        except ValueError:
+            await update.message.reply_text("Uso: /logs [número de líneas] (máx 500)")
+            return
+
+        if not self._log_path.exists():
+            await update.message.reply_text(
+                f"⚠️ Archivo de log no encontrado: {self._log_path}"
+            )
+            return
+
+        msg = await update.message.reply_text(
+            f"📋 Obteniendo últimas {n_lines} líneas de log..."
+        )
+        loop = asyncio.get_running_loop()
+        try:
+            output = await loop.run_in_executor(
+                None, _tail_file, self._log_path, n_lines
+            )
+            logger.info(
+                "event=cmd_end command=/logs user=%d lines=%d", user_id, n_lines
+            )
+        except Exception as exc:
+            logger.error(
+                "event=cmd_failed command=/logs user=%d", user_id, exc_info=True
+            )
+            await msg.edit_text(f"❌ Error leyendo logs: {exc}")
+            return
+
+        if not output.strip():
+            await msg.edit_text("⚠️ El archivo de log está vacío.")
+            return
+
+        # Chunk raw escaped text first, then wrap each chunk in <pre>.
+        # This ensures Telegram always receives valid, self-contained HTML.
+        escaped = html.escape(output)
+        raw_chunks = self._formatter.chunk(escaped, max_len=3900)
+        header = f"<b>Logs (últimas {n_lines} líneas):</b>\n"
+        for i, raw_chunk in enumerate(raw_chunks):
+            text = (header if i == 0 else "") + f"<pre>{raw_chunk}</pre>"
+            try:
+                if i == 0:
+                    await msg.edit_text(text, parse_mode="HTML")
+                else:
+                    await update.message.reply_text(text, parse_mode="HTML")
+            except Exception:
+                if i == 0:
+                    await msg.edit_text(text)
+                else:
+                    await update.message.reply_text(text)
 
     async def cmd_memoria(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE

@@ -219,7 +219,8 @@ def test_slim_race_predictions_dict_format():
         "predictions": {"time5K": 1500, "time10K": 3100},
     }
     out = slim_race_predictions(record)
-    assert out["time5K"] == 1500
+    assert out["time5K"] == "0:25:00"
+    assert out["time10K"] == "0:51:40"
 
 
 def test_slim_race_predictions_list_format():
@@ -228,7 +229,24 @@ def test_slim_race_predictions_list_format():
         "predictions": [{"time5K": 1600, "time10K": 3300}],
     }
     out = slim_race_predictions(record)
-    assert out["time5K"] == 1600
+    assert out["time5K"] == "0:26:40"
+
+
+def test_slim_race_predictions_hms_format():
+    record = {
+        "date": "2026-05-12",
+        "predictions": {
+            "time5K": 1241,
+            "time10K": 2616,
+            "timeHalfMarathon": 5802,
+            "timeMarathon": 12725,
+        },
+    }
+    out = slim_race_predictions(record)
+    assert out["time5K"] == "0:20:41"
+    assert out["time10K"] == "0:43:36"
+    assert out["timeHalfMarathon"] == "1:36:42"
+    assert out["timeMarathon"] == "3:32:05"
 
 
 # ── slim_lactate_threshold ────────────────────────────────────────────────────

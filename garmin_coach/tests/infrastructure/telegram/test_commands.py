@@ -1,6 +1,7 @@
 """Tests for CommandHandlers: one test per command handler."""
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from garmin_coach.infrastructure.telegram.handlers.commands import CommandHandlers
@@ -23,6 +24,7 @@ def _make_handlers(**overrides):
         formatter=MessageFormatter(),
         authorizer=Authorizer(ALLOWED_USER_ID),
         garmin_client=MagicMock(),
+        log_path=Path("/data/logs/bot.log"),
     )
     defaults.update(overrides)
     return CommandHandlers(**defaults)

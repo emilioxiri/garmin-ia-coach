@@ -25,10 +25,11 @@ def _fake_llm(*responses):
     return llm
 
 
-def _fake_registry(dispatch_result=None):
+def _fake_registry(dispatch_result=None, known=None):
     registry = MagicMock()
     registry.specs.return_value = []
     registry.dispatch.return_value = dispatch_result or {}
+    registry.known_names.return_value = set(known or [])
     return registry
 
 
@@ -340,3 +341,47 @@ def test_chat_recovers_inline_json_tool_call():
         if m.get("role") == "assistant" and m.get("tool_calls")
     )
     assert assistant_with_tools["content"] is None
+
+
+def test_chat_recovers_bracket_tool_call():
+    """LLM emits `[get_personal_records]` as plain text; we recover and call it."""
+    bracket_text = "La carrera te sale bien.\n\n[get_personal_records]"
+    llm = _fake_llm(_ai(bracket_text), _ai("Tu 5K está en 20:41."))
+    registry = _fake_registry(
+        dispatch_result={"records": {}},
+        known=["get_personal_records", "get_fitness_snapshot"],
+    )
+    session = _session(llm=llm, registry=registry)
+
+    result = session.chat("¿Cuáles son mis predicciones?")
+
+    assert result == "Tu 5K está en 20:41."
+    registry.dispatch.assert_called_once_with("get_personal_records", {})
+    tool_msg = next(m for m in session.history if m.get("role") == "tool")
+    assert tool_msg["name"] == "get_personal_records"
+
+
+def test_chat_recovers_bracket_tool_call_from_bad_request():
+    """Groq returns 400 with `[get_fitness_snapshot]` as failed_generation; we recover."""
+    err = _bad_request(
+        {
+            "error": {
+                "code": "tool_use_failed",
+                "failed_generation": "[get_fitness_snapshot]",
+            }
+        }
+    )
+    llm = MagicMock()
+    llm.chat.side_effect = [err, _ai("Tu VO2max está en 52.")]
+    registry = _fake_registry(
+        dispatch_result={"fitness_metrics": {"vo2max_running": 52}},
+        known=["get_fitness_snapshot", "get_personal_records"],
+    )
+    session = _session(llm=llm, registry=registry)
+
+    result = session.chat("¿Mis predicciones de carrera?")
+
+    assert result == "Tu VO2max está en 52."
+    registry.dispatch.assert_called_once_with("get_fitness_snapshot", {})
+    tool_msg = next(m for m in session.history if m.get("role") == "tool")
+    assert tool_msg["name"] == "get_fitness_snapshot"

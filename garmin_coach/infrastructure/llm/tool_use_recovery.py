@@ -14,6 +14,8 @@ from garmin_coach.app.logging_setup import get_logger
 
 logger = get_logger(__name__)
 
+BRACKET_TOOL_RE = re.compile(r"\[([A-Za-z_][A-Za-z0-9_]*)\]")
+
 FUNCTION_TAG_RE = re.compile(
     r"<\s*function\s*=.*?(?:</?function>|$)", re.DOTALL | re.IGNORECASE
 )
@@ -113,6 +115,20 @@ def _extract_balanced_json(text: str) -> list[str]:
             continue
         i += 1
     return out
+
+
+def parse_bracket_tool_call(
+    text: str, known_tools: set[str]
+) -> tuple[str, dict] | None:
+    """Detect `[tool_name]` emitted as plain text for a known tool.
+
+    Returns (tool_name, {}) when matched, else None.
+    """
+    for m in BRACKET_TOOL_RE.finditer(text):
+        name = m.group(1)
+        if name in known_tools:
+            return name, {}
+    return None
 
 
 def parse_inline_tool_calls(text: str) -> list[tuple[str, dict]] | None:

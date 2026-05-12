@@ -82,6 +82,9 @@ class ToolRegistry:
     def specs(self) -> list[dict]:
         return [t.to_spec() for t in self._tools.values()]
 
+    def known_names(self) -> set[str]:
+        return set(self._tools.keys())
+
     def dispatch(self, name: str, args: dict) -> Any:
         """Run a tool by name with kwargs. Returns serializable data or error dict.
 

@@ -24,7 +24,7 @@ def test_fetch_activities_happy():
     fetcher = GarminDataFetcher(g)
     result = fetcher.fetch_activities("2024-01-01", "2024-01-07")
     assert result == [{"activityId": 1}]
-    g.get_activities_by_date.assert_called_once_with("2024-01-01", "2024-01-07", 200)
+    g.get_activities_by_date.assert_called_once_with("2024-01-01", "2024-01-07")
 
 
 def test_fetch_activities_exception_returns_empty():

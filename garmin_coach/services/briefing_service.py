@@ -30,6 +30,7 @@ class BriefingService:
         logger.info("event=briefing_start moment=%s", moment)
         t0 = time.monotonic()
         context = self._context_builder.build(days=7)
+        context.pop("race_predictions", None)
 
         if moment == "morning":
             prompt = (
@@ -44,7 +45,7 @@ class BriefingService:
                 "Buenas noches. Dame el resumen del día:\n"
                 "1. Valoración del entrenamiento de hoy (si lo hay)\n"
                 "2. Análisis de recuperación para esta noche\n"
-                "3. Recomendaciones para mañana\n\n"
+                "3. Recomendaciones SOLO para mañana — NO para hoy, ya es de noche y no hay tiempo de actuar\n\n"
                 f"[DATOS]\n{json.dumps(context, ensure_ascii=False)}"
             )
 

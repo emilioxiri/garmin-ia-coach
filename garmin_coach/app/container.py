@@ -243,6 +243,7 @@ class Container:
             formatter=self.formatter,
             authorizer=self.authorizer,
             garmin_client=self.garmin_client,
+            log_path=self.settings.log_path,
         )
 
     def _build_chat_handler(self):

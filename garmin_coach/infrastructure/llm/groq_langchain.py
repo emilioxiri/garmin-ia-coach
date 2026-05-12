@@ -22,7 +22,7 @@ class ChatGroqClient(LLMClient):
         self,
         model: str,
         chat_max_tokens: int = 2400,
-        briefing_max_tokens: int = 1800,
+        briefing_max_tokens: int = 2500,
         temperature: float = 0.85,
     ) -> None:
         self._model = model

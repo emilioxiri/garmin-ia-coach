@@ -96,7 +96,7 @@ def test_fitness_snapshot_with_race_predictions():
     result = tool.handle()
     preds = result.data["race_predictions"]
     assert preds is not None
-    assert preds["time5K"] == 1500
+    assert preds["time5K"] == "0:25:00"
 
 
 def test_fitness_snapshot_with_endurance_score():

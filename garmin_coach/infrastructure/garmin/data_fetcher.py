@@ -30,15 +30,12 @@ class GarminDataFetcher:
     def __init__(self, garmin: Garmin) -> None:
         self._g = garmin
 
-    def fetch_activities(
-        self, start_date: str, end_date: str, limit: int = 200
-    ) -> list[dict]:
+    def fetch_activities(self, start_date: str, end_date: str) -> list[dict]:
         result = _safe(
             "activities",
             self._g.get_activities_by_date,
             start_date,
             end_date,
-            limit,
         )
         return result if isinstance(result, list) else []
 
@@ -80,13 +77,7 @@ class GarminDataFetcher:
         )
 
     def fetch_race_predictions(self) -> dict | None:
-        from datetime import date, timedelta
-
-        today = date.today()
-        start = (today - timedelta(days=30)).isoformat()
-        return _safe(
-            "race_predictions", self._g.get_race_predictions, start, today.isoformat()
-        )
+        return _safe("race_predictions", self._g.get_race_predictions)
 
     def fetch_lactate_threshold(self) -> dict | None:
         return _safe("lactate_threshold", self._g.get_lactate_threshold)

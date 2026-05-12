@@ -19,6 +19,7 @@ from garmin_coach.infrastructure.llm.message_helpers import (
 )
 from garmin_coach.infrastructure.llm.tool_use_recovery import (
     failed_generation_payload,
+    parse_bracket_tool_call,
     parse_function_tag,
     parse_inline_tool_calls,
     salvage_tool_use_failed,
@@ -137,6 +138,19 @@ class CoachSession:
                         self.history.append(synthetic["assistant_msg"])
                         self.history.extend(synthetic["tool_msgs"])
                         continue
+                    bracket = parse_bracket_tool_call(
+                        failed, self._registry.known_names()
+                    )
+                    if bracket:
+                        name, args = bracket
+                        logger.warning(
+                            "Groq tool_use_failed; recovered bracket tool call [%s]",
+                            name,
+                        )
+                        synthetic = self._synthesize_inline_tool_calls([(name, args)])
+                        self.history.append(synthetic["assistant_msg"])
+                        self.history.extend(synthetic["tool_msgs"])
+                        continue
                     salvaged = salvage_tool_use_failed(exc)
                     if salvaged is None:
                         raise
@@ -164,6 +178,19 @@ class CoachSession:
                             len(inline),
                         )
                         synthetic = self._synthesize_inline_tool_calls(inline)
+                        self.history[-1] = synthetic["assistant_msg"]
+                        self.history.extend(synthetic["tool_msgs"])
+                        assistant_message = ""
+                        continue
+                    bracket = parse_bracket_tool_call(
+                        assistant_message, self._registry.known_names()
+                    )
+                    if bracket:
+                        name, args = bracket
+                        logger.warning(
+                            "LLM emitted [%s] as bracket tool call; recovering", name
+                        )
+                        synthetic = self._synthesize_inline_tool_calls([(name, args)])
                         self.history[-1] = synthetic["assistant_msg"]
                         self.history.extend(synthetic["tool_msgs"])
                         assistant_message = ""
