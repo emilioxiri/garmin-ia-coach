@@ -8,5 +8,5 @@ from pathlib import Path
 
 
 def read_system_prompt() -> str:
-    """Return the coach system prompt text from coach_system.txt."""
-    return (Path(__file__).parent / "coach_system.txt").read_text(encoding="utf-8")
+    """Return the coach system prompt text from coach_system.md."""
+    return (Path(__file__).parent / "coach_system.md").read_text(encoding="utf-8")

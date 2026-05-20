@@ -85,7 +85,7 @@ class ContextBuilder:
         activities = sorted(
             [
                 a
-                for a in self._activity_repo.all()
+                for a in self._activity_repo.find_by_type(activity_type="running", days_back=7)
                 if bool(a.get("startTimeLocal"))
                 and a.get("startTimeLocal", "") >= cutoff
             ],
